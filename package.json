@@ -16,7 +16,9 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 execute growthos-dev --local --file=./src/lib/db/migrations/0000_init.sql",
-    "db:migrate:prod": "wrangler d1 execute growthos-prod --remote --file=./src/lib/db/migrations/0000_init.sql"
+    "db:migrate:prod": "wrangler d1 execute growthos-prod --remote --file=./src/lib/db/migrations/0000_init.sql",
+    "deploy": "npm run build && npx wrangler pages deploy .vercel/output/static --project-name=growthos",
+    "ship": "git add -A && git commit -m \"update\" && git push && npm run deploy"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^2.2.2",
