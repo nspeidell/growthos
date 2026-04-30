@@ -7,8 +7,6 @@ import {
   Trash2,
   Download,
   ExternalLink,
-  ToggleLeft,
-  ToggleRight,
   Loader2,
   Link2,
 } from "lucide-react";
@@ -16,7 +14,6 @@ import {
   listLeadMagnets,
   createLeadMagnet,
   deleteLeadMagnet,
-  toggleLeadMagnetActive,
 } from "./actions";
 import type { LeadMagnet } from "@/lib/db/schema";
 
@@ -59,13 +56,6 @@ export default function FunnelsDashboard() {
     });
   }
 
-  function handleToggle(id: string) {
-    startTransition(async () => {
-      await toggleLeadMagnetActive(id);
-      await load();
-    });
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -75,25 +65,17 @@ export default function FunnelsDashboard() {
   }
 
   const totalDownloads = magnets.reduce((sum, m) => sum + (m.downloads ?? 0), 0);
-  const activeMagnets = magnets.filter((m) => m.isActive).length;
 
   return (
     <div className="space-y-6">
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
             <FileText className="w-4 h-4" />
             <span className="text-xs">Total</span>
           </div>
           <p className="text-xl font-bold text-foreground">{magnets.length}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-            <ToggleRight className="w-4 h-4" />
-            <span className="text-xs">Active</span>
-          </div>
-          <p className="text-xl font-bold text-foreground">{activeMagnets}</p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
@@ -158,35 +140,29 @@ export default function FunnelsDashboard() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Type</label>
-                <select
-                  name="type"
+                <label className="block text-sm font-medium text-foreground mb-1">File URL</label>
+                <input
+                  name="fileUrl"
                   required
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-                >
-                  <option value="ebook">Ebook</option>
-                  <option value="checklist">Checklist</option>
-                  <option value="template">Template</option>
-                  <option value="course">Course</option>
-                  <option value="webinar">Webinar</option>
-                  <option value="other">Other</option>
-                </select>
+                  placeholder="https://cdn.example.com/growth-playbook.pdf"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-foreground mb-1">File R2 Key (optional)</label>
+                <label className="block text-sm font-medium text-foreground mb-1">File Type (optional)</label>
                 <input
-                  name="fileR2Key"
+                  name="fileType"
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder="lead-magnets/growth-playbook.pdf"
+                  placeholder="pdf"
                 />
               </div>
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-foreground mb-1">Redirect URL (optional)</label>
+                <label className="block text-sm font-medium text-foreground mb-1">Cover URL (optional)</label>
                 <input
-                  name="redirectUrl"
+                  name="coverUrl"
                   type="url"
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder="https://example.com/thank-you"
+                  placeholder="https://cdn.example.com/cover.png"
                 />
               </div>
             </div>
@@ -229,22 +205,6 @@ export default function FunnelsDashboard() {
             <div key={magnet.id} className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        magnet.isActive
-                          ? "bg-success/10 text-success"
-                          : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {magnet.isActive ? "Active" : "Inactive"}
-                    </span>
-                    {magnet.type && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground uppercase">
-                        {magnet.type}
-                      </span>
-                    )}
-                  </div>
                   <p className="font-medium text-foreground truncate">{magnet.title}</p>
                   {magnet.description && (
                     <p className="text-sm text-muted-foreground mt-0.5 line-clamp-1">
@@ -272,18 +232,6 @@ export default function FunnelsDashboard() {
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
-                  <button
-                    onClick={() => handleToggle(magnet.id)}
-                    disabled={isPending}
-                    className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
-                    title={magnet.isActive ? "Deactivate" : "Activate"}
-                  >
-                    {magnet.isActive ? (
-                      <ToggleRight className="w-3.5 h-3.5 text-success" />
-                    ) : (
-                      <ToggleLeft className="w-3.5 h-3.5" />
-                    )}
-                  </button>
                   <button
                     onClick={() => handleDelete(magnet.id)}
                     disabled={isPending}

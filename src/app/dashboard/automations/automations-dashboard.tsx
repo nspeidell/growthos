@@ -8,13 +8,10 @@ import {
   ToggleLeft,
   ToggleRight,
   Loader2,
-  Mail,
-  Tag,
-  Clock,
-  Webhook,
   UserPlus,
   Download,
   Play,
+  Tag,
 } from "lucide-react";
 import {
   listAutomations,
@@ -25,17 +22,10 @@ import {
 import type { Automation } from "@/lib/db/schema";
 
 const TRIGGERS = [
-  { value: "subscriber_added", label: "New Subscriber", icon: UserPlus, description: "When someone subscribes" },
+  { value: "subscribe", label: "New Subscriber", icon: UserPlus, description: "When someone subscribes" },
   { value: "tag_added", label: "Tag Added", icon: Tag, description: "When a tag is applied" },
-  { value: "lead_magnet_downloaded", label: "Lead Magnet", icon: Download, description: "When a lead magnet is downloaded" },
+  { value: "lead_magnet", label: "Lead Magnet", icon: Download, description: "When a lead magnet is downloaded" },
   { value: "manual", label: "Manual", icon: Play, description: "Triggered manually" },
-];
-
-const ACTIONS = [
-  { value: "send_email", label: "Send Email", icon: Mail, description: "Send a templated email" },
-  { value: "add_tag", label: "Add Tag", icon: Tag, description: "Apply a tag to the subscriber" },
-  { value: "wait", label: "Wait/Delay", icon: Clock, description: "Wait before next action" },
-  { value: "webhook", label: "Webhook", icon: Webhook, description: "Call an external URL" },
 ];
 
 export default function AutomationsDashboard() {
@@ -47,7 +37,6 @@ export default function AutomationsDashboard() {
 
   // Create form state
   const [selectedTrigger, setSelectedTrigger] = useState("");
-  const [selectedAction, setSelectedAction] = useState("");
 
   useEffect(() => {
     load();
@@ -67,7 +56,6 @@ export default function AutomationsDashboard() {
       if (result.success) {
         setShowCreate(false);
         setSelectedTrigger("");
-        setSelectedAction("");
         await load();
       } else {
         setError(result.error ?? "Failed to create automation");
@@ -98,8 +86,8 @@ export default function AutomationsDashboard() {
     );
   }
 
-  const activeCount = items.filter((a) => a.isActive).length;
-  const totalExecutions = items.reduce((sum, a) => sum + (a.executionCount ?? 0), 0);
+  const activeCount = items.filter((a) => a.automationStatus === "active").length;
+  const totalEnrolled = items.reduce((sum, a) => sum + (a.enrolledCount ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -119,9 +107,9 @@ export default function AutomationsDashboard() {
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-            <Play className="w-4 h-4" /><span className="text-xs">Executions</span>
+            <Play className="w-4 h-4" /><span className="text-xs">Enrolled</span>
           </div>
-          <p className="text-xl font-bold text-foreground">{totalExecutions}</p>
+          <p className="text-xl font-bold text-foreground">{totalEnrolled}</p>
         </div>
       </div>
 
@@ -183,7 +171,7 @@ export default function AutomationsDashboard() {
                   );
                 })}
               </div>
-              <input type="hidden" name="trigger" value={selectedTrigger} />
+              <input type="hidden" name="triggerType" value={selectedTrigger} />
             </div>
 
             {/* Trigger Config */}
@@ -197,7 +185,7 @@ export default function AutomationsDashboard() {
                 />
               </div>
             )}
-            {selectedTrigger === "lead_magnet_downloaded" && (
+            {selectedTrigger === "lead_magnet" && (
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Lead Magnet Slug (optional)</label>
                 <input
@@ -208,77 +196,17 @@ export default function AutomationsDashboard() {
               </div>
             )}
 
-            {/* Action Selection */}
+            {/* Steps (JSON) */}
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">...do this:</label>
-              <div className="grid grid-cols-2 gap-2">
-                {ACTIONS.map((a) => {
-                  const Icon = a.icon;
-                  return (
-                    <button
-                      key={a.value}
-                      type="button"
-                      onClick={() => setSelectedAction(a.value)}
-                      className={`flex items-center gap-2 rounded-lg border p-3 text-left transition-colors ${
-                        selectedAction === a.value
-                          ? "border-primary bg-primary/5 ring-1 ring-primary"
-                          : "border-border hover:border-primary/40"
-                      }`}
-                    >
-                      <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{a.label}</p>
-                        <p className="text-xs text-muted-foreground">{a.description}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <input type="hidden" name="action" value={selectedAction} />
+              <label className="block text-sm font-medium text-foreground mb-1">Steps (JSON)</label>
+              <textarea
+                name="steps"
+                required
+                rows={4}
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono focus:border-ring focus:ring-1 focus:ring-ring"
+                placeholder='[{"type": "send_email", "config": {"subject": "Welcome!", "body": "<p>Hey {{name}}!</p>"}}, {"type": "wait", "config": {"delayHours": 24}}]'
+              />
             </div>
-
-            {/* Action Config */}
-            {selectedAction === "send_email" && (
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Email Config (JSON)</label>
-                <textarea
-                  name="actionConfig"
-                  rows={3}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder='{"subject": "Welcome!", "body": "<p>Hey {{name}}!</p>"}'
-                />
-              </div>
-            )}
-            {selectedAction === "add_tag" && (
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Tag to add</label>
-                <input
-                  name="actionConfig"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder='{"tag": "engaged"}'
-                />
-              </div>
-            )}
-            {selectedAction === "wait" && (
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Delay (JSON)</label>
-                <input
-                  name="actionConfig"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder='{"delayHours": 24}'
-                />
-              </div>
-            )}
-            {selectedAction === "webhook" && (
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">Webhook URL</label>
-                <input
-                  name="actionConfig"
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder='{"url": "https://hooks.example.com/...", "method": "POST"}'
-                />
-              </div>
-            )}
 
             <div className="flex justify-end gap-2">
               <button
@@ -290,7 +218,7 @@ export default function AutomationsDashboard() {
               </button>
               <button
                 type="submit"
-                disabled={isPending || !selectedTrigger || !selectedAction}
+                disabled={isPending || !selectedTrigger}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
@@ -313,10 +241,8 @@ export default function AutomationsDashboard() {
       ) : (
         <div className="space-y-3">
           {items.map((automation) => {
-            const trigger = TRIGGERS.find((t) => t.value === automation.trigger);
-            const action = ACTIONS.find((a) => a.value === automation.action);
+            const trigger = TRIGGERS.find((t) => t.value === automation.triggerType);
             const TriggerIcon = trigger?.icon ?? Zap;
-            const ActionIcon = action?.icon ?? Zap;
 
             return (
               <div key={automation.id} className="rounded-xl border border-border bg-card p-5">
@@ -325,16 +251,16 @@ export default function AutomationsDashboard() {
                     <div className="flex items-center gap-2 mb-1">
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          automation.isActive
+                          automation.automationStatus === "active"
                             ? "bg-success/10 text-success"
                             : "bg-muted text-muted-foreground"
                         }`}
                       >
-                        {automation.isActive ? "Active" : "Paused"}
+                        {automation.automationStatus === "active" ? "Active" : automation.automationStatus === "paused" ? "Paused" : "Draft"}
                       </span>
-                      {automation.executionCount != null && automation.executionCount > 0 && (
+                      {automation.enrolledCount != null && automation.enrolledCount > 0 && (
                         <span className="text-xs text-muted-foreground">
-                          {automation.executionCount} runs
+                          {automation.enrolledCount} enrolled
                         </span>
                       )}
                     </div>
@@ -342,12 +268,7 @@ export default function AutomationsDashboard() {
                     <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
                         <TriggerIcon className="w-3 h-3" />
-                        {trigger?.label ?? automation.trigger}
-                      </span>
-                      <span>→</span>
-                      <span className="inline-flex items-center gap-1">
-                        <ActionIcon className="w-3 h-3" />
-                        {action?.label ?? automation.action}
+                        {trigger?.label ?? automation.triggerType}
                       </span>
                     </div>
                   </div>
@@ -357,7 +278,7 @@ export default function AutomationsDashboard() {
                       disabled={isPending}
                       className="rounded-lg border border-border p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50"
                     >
-                      {automation.isActive ? (
+                      {automation.automationStatus === "active" ? (
                         <ToggleRight className="w-4 h-4 text-success" />
                       ) : (
                         <ToggleLeft className="w-4 h-4" />

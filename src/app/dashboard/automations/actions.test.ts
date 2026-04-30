@@ -58,19 +58,22 @@ describe("createAutomation", () => {
       id: "auto_mock_id",
       workspaceId: "ws_1",
       name: "Test",
-      trigger: "subscriber_added",
-      action: "send_email",
-      isActive: true,
-      executionCount: 0,
+      triggerType: "subscribe",
+      triggerConfig: null,
+      steps: "[]",
+      automationStatus: "draft",
+      enrolledCount: 0,
+      completedCount: 0,
       createdAt: new Date(),
+      updatedAt: new Date(),
     });
   });
 
   it("rejects missing name", async () => {
     const fd = new FormData();
     fd.set("name", "");
-    fd.set("trigger", "subscriber_added");
-    fd.set("action", "send_email");
+    fd.set("triggerType", "subscribe");
+    fd.set("steps", "[]");
 
     const result = await createAutomation(fd);
     expect(result.success).toBe(false);
@@ -82,8 +85,8 @@ describe("createAutomation", () => {
   it("rejects invalid trigger type", async () => {
     const fd = new FormData();
     fd.set("name", "Valid Name");
-    fd.set("trigger", "invalid_trigger");
-    fd.set("action", "send_email");
+    fd.set("triggerType", "invalid_trigger");
+    fd.set("steps", "[]");
 
     const result = await createAutomation(fd);
     expect(result.success).toBe(false);
@@ -92,71 +95,37 @@ describe("createAutomation", () => {
     }
   });
 
-  it("rejects invalid action type", async () => {
-    const fd = new FormData();
-    fd.set("name", "Valid Name");
-    fd.set("trigger", "subscriber_added");
-    fd.set("action", "delete_everything");
-
-    const result = await createAutomation(fd);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.code).toBe("VALIDATION");
-    }
-  });
-
-  it("succeeds with valid trigger and action", async () => {
+  it("succeeds with valid trigger and steps", async () => {
     const fd = new FormData();
     fd.set("name", "Welcome Sequence");
-    fd.set("trigger", "subscriber_added");
-    fd.set("action", "send_email");
+    fd.set("triggerType", "subscribe");
+    fd.set("steps", '[{"type": "send_email"}]');
 
     const result = await createAutomation(fd);
     expect(result.success).toBe(true);
   });
 
   it("accepts all valid trigger types", async () => {
-    const triggers = ["subscriber_added", "tag_added", "lead_magnet_downloaded", "manual"];
-    for (const trigger of triggers) {
+    const triggers = ["subscribe", "tag_added", "lead_magnet", "manual"];
+    for (const triggerType of triggers) {
       mockDb.get.mockResolvedValue({
         id: "auto_mock_id",
         workspaceId: "ws_1",
         name: "Test",
-        trigger,
-        action: "send_email",
-        isActive: true,
-        executionCount: 0,
+        triggerType,
+        triggerConfig: null,
+        steps: "[]",
+        automationStatus: "draft",
+        enrolledCount: 0,
+        completedCount: 0,
         createdAt: new Date(),
+        updatedAt: new Date(),
       });
 
       const fd = new FormData();
-      fd.set("name", `Test ${trigger}`);
-      fd.set("trigger", trigger);
-      fd.set("action", "send_email");
-
-      const result = await createAutomation(fd);
-      expect(result.success).toBe(true);
-    }
-  });
-
-  it("accepts all valid action types", async () => {
-    const actions = ["send_email", "add_tag", "wait", "webhook"];
-    for (const action of actions) {
-      mockDb.get.mockResolvedValue({
-        id: "auto_mock_id",
-        workspaceId: "ws_1",
-        name: "Test",
-        trigger: "manual",
-        action,
-        isActive: true,
-        executionCount: 0,
-        createdAt: new Date(),
-      });
-
-      const fd = new FormData();
-      fd.set("name", `Test ${action}`);
-      fd.set("trigger", "manual");
-      fd.set("action", action);
+      fd.set("name", `Test ${triggerType}`);
+      fd.set("triggerType", triggerType);
+      fd.set("steps", "[]");
 
       const result = await createAutomation(fd);
       expect(result.success).toBe(true);
@@ -166,8 +135,8 @@ describe("createAutomation", () => {
   it("rejects name over 200 chars", async () => {
     const fd = new FormData();
     fd.set("name", "A".repeat(201));
-    fd.set("trigger", "manual");
-    fd.set("action", "webhook");
+    fd.set("triggerType", "manual");
+    fd.set("steps", "[]");
 
     const result = await createAutomation(fd);
     expect(result.success).toBe(false);
@@ -196,38 +165,38 @@ describe("toggleAutomation", () => {
     mockDb.get.mockResolvedValueOnce({
       id: "auto_1",
       workspaceId: "ws_other",
-      isActive: true,
+      automationStatus: "active",
     });
 
     const result = await toggleAutomation("auto_1");
     expect(result.success).toBe(false);
   });
 
-  it("toggles active to inactive", async () => {
+  it("toggles active to paused", async () => {
     mockDb.get.mockResolvedValueOnce({
       id: "auto_1",
       workspaceId: "ws_1",
-      isActive: true,
+      automationStatus: "active",
     });
 
     const result = await toggleAutomation("auto_1");
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.isActive).toBe(false);
+      expect(result.data.automationStatus).toBe("paused");
     }
   });
 
-  it("toggles inactive to active", async () => {
+  it("toggles paused to active", async () => {
     mockDb.get.mockResolvedValueOnce({
       id: "auto_1",
       workspaceId: "ws_1",
-      isActive: false,
+      automationStatus: "paused",
     });
 
     const result = await toggleAutomation("auto_1");
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.isActive).toBe(true);
+      expect(result.data.automationStatus).toBe("active");
     }
   });
 });

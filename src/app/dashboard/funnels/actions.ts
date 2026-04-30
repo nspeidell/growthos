@@ -16,19 +16,18 @@ const CreateLeadMagnetSchema = z.object({
   title: z.string().min(1).max(200),
   slug: z.string().min(1).max(100).regex(/^[a-z0-9-]+$/),
   description: z.string().max(500).optional(),
-  type: z.enum(["ebook", "checklist", "template", "course", "webinar", "other"]),
-  fileR2Key: z.string().optional(),
-  redirectUrl: z.string().url().optional(),
+  fileUrl: z.string().min(1),
+  fileType: z.string().optional(),
+  coverUrl: z.string().url().optional(),
 });
 
 const UpdateLeadMagnetSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(500).optional(),
-  type: z.enum(["ebook", "checklist", "template", "course", "webinar", "other"]).optional(),
-  fileR2Key: z.string().optional(),
-  redirectUrl: z.string().url().optional(),
-  isActive: z.boolean().optional(),
+  fileUrl: z.string().min(1).optional(),
+  fileType: z.string().optional(),
+  coverUrl: z.string().url().optional(),
 });
 
 // ─── List Lead Magnets ───
@@ -62,9 +61,9 @@ export async function createLeadMagnet(
       title: formData.get("title"),
       slug: formData.get("slug"),
       description: formData.get("description") || undefined,
-      type: formData.get("type") || "other",
-      fileR2Key: formData.get("fileR2Key") || undefined,
-      redirectUrl: formData.get("redirectUrl") || undefined,
+      fileUrl: formData.get("fileUrl"),
+      fileType: formData.get("fileType") || undefined,
+      coverUrl: formData.get("coverUrl") || undefined,
     });
 
     const id = createId();
@@ -75,10 +74,9 @@ export async function createLeadMagnet(
       title: input.title,
       slug: input.slug,
       description: input.description ?? null,
-      type: input.type,
-      fileR2Key: input.fileR2Key ?? null,
-      redirectUrl: input.redirectUrl ?? null,
-      isActive: true,
+      fileUrl: input.fileUrl,
+      fileType: input.fileType ?? null,
+      coverUrl: input.coverUrl ?? null,
       downloads: 0,
       createdAt: new Date(),
     });
@@ -107,10 +105,9 @@ export async function updateLeadMagnet(
       id: formData.get("id"),
       title: formData.get("title") || undefined,
       description: formData.get("description") || undefined,
-      type: formData.get("type") || undefined,
-      fileR2Key: formData.get("fileR2Key") || undefined,
-      redirectUrl: formData.get("redirectUrl") || undefined,
-      isActive: formData.get("isActive") === "true" ? true : formData.get("isActive") === "false" ? false : undefined,
+      fileUrl: formData.get("fileUrl") || undefined,
+      fileType: formData.get("fileType") || undefined,
+      coverUrl: formData.get("coverUrl") || undefined,
     });
 
     const existing = await db
@@ -126,10 +123,9 @@ export async function updateLeadMagnet(
     const updates: Record<string, unknown> = {};
     if (input.title !== undefined) updates.title = input.title;
     if (input.description !== undefined) updates.description = input.description;
-    if (input.type !== undefined) updates.type = input.type;
-    if (input.fileR2Key !== undefined) updates.fileR2Key = input.fileR2Key;
-    if (input.redirectUrl !== undefined) updates.redirectUrl = input.redirectUrl;
-    if (input.isActive !== undefined) updates.isActive = input.isActive;
+    if (input.fileUrl !== undefined) updates.fileUrl = input.fileUrl;
+    if (input.fileType !== undefined) updates.fileType = input.fileType;
+    if (input.coverUrl !== undefined) updates.coverUrl = input.coverUrl;
 
     await db
       .update(leadMagnets)
@@ -168,35 +164,5 @@ export async function deleteLeadMagnet(
 
     await db.delete(leadMagnets).where(eq(leadMagnets.id, id));
     return { deleted: true };
-  });
-}
-
-// ─── Toggle Active Status ───
-
-export async function toggleLeadMagnetActive(
-  id: string
-): Promise<ActionResult<{ isActive: boolean }>> {
-  return safeAction(async () => {
-    const session = await requirePermission("content:write");
-    const { DB } = getBindings();
-    const db = createDb(DB);
-
-    const existing = await db
-      .select()
-      .from(leadMagnets)
-      .where(eq(leadMagnets.id, id))
-      .get();
-
-    if (!existing || existing.workspaceId !== session.workspaceId) {
-      throw new Error("Lead magnet not found");
-    }
-
-    const newStatus = !existing.isActive;
-    await db
-      .update(leadMagnets)
-      .set({ isActive: newStatus })
-      .where(eq(leadMagnets.id, id));
-
-    return { isActive: newStatus };
   });
 }

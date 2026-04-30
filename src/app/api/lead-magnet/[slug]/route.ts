@@ -44,8 +44,7 @@ export async function GET(
     .where(
       and(
         eq(leadMagnets.workspaceId, workspace.id),
-        eq(leadMagnets.slug, slug),
-        eq(leadMagnets.isActive, true)
+        eq(leadMagnets.slug, slug)
       )
     )
     .get();
@@ -60,8 +59,8 @@ export async function GET(
   return NextResponse.json({
     title: magnet.title,
     description: magnet.description,
-    type: magnet.type,
-    fileR2Key: magnet.fileR2Key,
-    redirectUrl: magnet.redirectUrl,
+    fileUrl: magnet.fileUrl,
+    fileType: magnet.fileType,
+    coverUrl: magnet.coverUrl,
   });
 }

@@ -826,9 +826,8 @@ export const adCampaigns = sqliteTable("ad_campaigns", {
     .notNull()
     .references(() => workspaces.id, { onDelete: "cascade" }),
   platform: text("platform", {
-    enum: ["meta", "google", "x", "reddit"],
+    enum: ["meta", "google", "x"],
   }).notNull(),
-  platformCampaignId: text("platform_campaign_id"),
   name: text("name").notNull(),
   objective: text("objective", {
     enum: ["awareness", "traffic", "engagement", "conversions", "app_installs"],
@@ -844,7 +843,6 @@ export const adCampaigns = sqliteTable("ad_campaigns", {
   impressions: integer("impressions").default(0),
   clicks: integer("clicks").default(0),
   conversions: integer("conversions").default(0),
-  cpa: real("cpa"), // cost per acquisition
   startDate: integer("start_date", { mode: "timestamp" }),
   endDate: integer("end_date", { mode: "timestamp" }),
   targeting: text("targeting"), // JSON: audience targeting config
@@ -870,9 +868,6 @@ export const adVariants = sqliteTable("ad_variants", {
   imageR2Key: text("image_r2_key"),
   ctaText: text("cta_text"),
   landingUrl: text("landing_url"),
-  impressions: integer("impressions").default(0),
-  clicks: integer("clicks").default(0),
-  conversions: integer("conversions").default(0),
   isWinner: integer("is_winner", { mode: "boolean" }).default(false),
 });
 
@@ -972,20 +967,23 @@ export const communities = sqliteTable("communities", {
     .notNull()
     .references(() => workspaces.id, { onDelete: "cascade" }),
   platform: text("platform", {
-    enum: ["facebook", "discord", "reddit", "custom"],
+    enum: ["facebook", "reddit", "discord", "slack"],
   }).notNull(),
-  platformGroupId: text("platform_group_id"), // External group/channel ID
+  platformId: text("platform_id"), // External group/channel ID
   name: text("name").notNull(),
   description: text("description"),
   memberCount: integer("member_count").default(0),
-  growthRate: real("growth_rate").default(0), // Weekly % growth
+  postCount: integer("post_count").default(0),
+  connectedAccountId: text("connected_account_id").references(() => connectedAccounts.id),
   communityStatus: text("community_status", {
     enum: ["active", "paused", "archived"],
   })
     .notNull()
     .default("active"),
-  lastSyncAt: integer("last_sync_at", { mode: "timestamp" }),
   createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
@@ -998,22 +996,27 @@ export const communityPosts = sqliteTable("community_posts", {
   communityId: text("community_id")
     .notNull()
     .references(() => communities.id, { onDelete: "cascade" }),
-  type: text("type", {
-    enum: ["discussion", "poll", "announcement", "engagement_prompt", "event"],
-  }).notNull(),
+  workspaceId: text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
   title: text("title"),
   body: text("body").notNull(),
-  pollOptions: text("poll_options"), // JSON array of options
-  scheduledFor: integer("scheduled_for", { mode: "timestamp" }),
-  publishedAt: integer("published_at", { mode: "timestamp" }),
+  postType: text("post_type", {
+    enum: ["text", "image", "link", "poll", "video"],
+  })
+    .notNull()
+    .default("text"),
+  platformPostId: text("platform_post_id"),
   postStatus: text("post_status", {
     enum: ["draft", "scheduled", "published", "failed"],
   })
     .notNull()
     .default("draft"),
-  platformPostId: text("platform_post_id"),
-  reactions: integer("reactions").default(0),
+  scheduledFor: integer("scheduled_for", { mode: "timestamp" }),
+  publishedAt: integer("published_at", { mode: "timestamp" }),
+  likes: integer("likes").default(0),
   comments: integer("comments").default(0),
+  shares: integer("shares").default(0),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -1029,9 +1032,9 @@ export const communityMembers = sqliteTable("community_members", {
     .references(() => communities.id, { onDelete: "cascade" }),
   platformUserId: text("platform_user_id").notNull(),
   displayName: text("display_name"),
-  joinedAt: integer("joined_at", { mode: "timestamp" }),
+  role: text("role", { enum: ["member", "moderator", "admin"] }).default("member"),
+  joinedAt: integer("joined_at", { mode: "timestamp" }).notNull(),
   engagementScore: integer("engagement_score").default(0),
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
 });
 
 // ─── SUBSCRIBERS (Newsletter) ───
@@ -1078,11 +1081,10 @@ export const newsletters = sqliteTable("newsletters", {
   fromEmail: text("from_email"),
   targetTags: text("target_tags"), // JSON: send to subscribers with these tags
   newsletterStatus: text("newsletter_status", {
-    enum: ["draft", "scheduled", "sending", "sent", "failed"],
+    enum: ["draft", "sending", "sent", "failed"],
   })
     .notNull()
     .default("draft"),
-  scheduledFor: integer("scheduled_for", { mode: "timestamp" }),
   sentAt: integer("sent_at", { mode: "timestamp" }),
   sentCount: integer("sent_count").default(0),
   openedCount: integer("opened_count").default(0),
@@ -1104,12 +1106,9 @@ export const leadMagnets = sqliteTable("lead_magnets", {
   slug: text("slug").notNull(),
   title: text("title").notNull(),
   description: text("description"),
-  type: text("type", {
-    enum: ["ebook", "checklist", "template", "course", "webinar", "other"],
-  }).notNull(),
-  fileR2Key: text("file_r2_key"), // Downloadable asset
-  redirectUrl: text("redirect_url"), // After signup
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
+  fileUrl: text("file_url").notNull(),
+  fileType: text("file_type"),
+  coverUrl: text("cover_url"),
   downloads: integer("downloads").default(0),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -1125,17 +1124,22 @@ export const automations = sqliteTable("automations", {
     .notNull()
     .references(() => workspaces.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  trigger: text("trigger", {
-    enum: ["subscriber_added", "tag_added", "lead_magnet_downloaded", "manual"],
+  triggerType: text("trigger_type", {
+    enum: ["subscribe", "tag_added", "lead_magnet", "manual"],
   }).notNull(),
-  triggerConfig: text("trigger_config"), // JSON: conditions
-  action: text("action", {
-    enum: ["send_email", "add_tag", "wait", "webhook"],
-  }).notNull(),
-  actionConfig: text("action_config"), // JSON: email template, tag name, delay, etc.
-  isActive: integer("is_active", { mode: "boolean" }).default(true),
-  executionCount: integer("execution_count").default(0),
+  triggerConfig: text("trigger_config"),
+  steps: text("steps").notNull(),
+  automationStatus: text("automation_status", {
+    enum: ["draft", "active", "paused"],
+  })
+    .notNull()
+    .default("draft"),
+  enrolledCount: integer("enrolled_count").default(0),
+  completedCount: integer("completed_count").default(0),
   createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });

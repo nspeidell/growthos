@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
       )
       .get();
 
-    if (lm && lm.isActive) {
+    if (lm) {
       resolvedLeadMagnetSlug = lm.slug;
       // Increment download count
       await db

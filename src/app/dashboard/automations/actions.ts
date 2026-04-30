@@ -14,10 +14,9 @@ import type { Automation } from "@/lib/db/schema";
 
 const CreateAutomationSchema = z.object({
   name: z.string().min(1).max(200),
-  trigger: z.enum(["subscriber_added", "tag_added", "lead_magnet_downloaded", "manual"]),
+  triggerType: z.enum(["subscribe", "tag_added", "lead_magnet", "manual"]),
   triggerConfig: z.string().optional(), // JSON
-  action: z.enum(["send_email", "add_tag", "wait", "webhook"]),
-  actionConfig: z.string().optional(), // JSON
+  steps: z.string().min(1), // JSON array of steps
 });
 
 // ─── List Automations ───
@@ -49,25 +48,26 @@ export async function createAutomation(
 
     const input = CreateAutomationSchema.parse({
       name: formData.get("name"),
-      trigger: formData.get("trigger"),
+      triggerType: formData.get("triggerType"),
       triggerConfig: formData.get("triggerConfig") || undefined,
-      action: formData.get("action"),
-      actionConfig: formData.get("actionConfig") || undefined,
+      steps: formData.get("steps"),
     });
 
     const id = createId();
+    const now = new Date();
 
     await db.insert(automations).values({
       id,
       workspaceId: session.workspaceId,
       name: input.name,
-      trigger: input.trigger,
+      triggerType: input.triggerType,
       triggerConfig: input.triggerConfig ?? null,
-      action: input.action,
-      actionConfig: input.actionConfig ?? null,
-      isActive: true,
-      executionCount: 0,
-      createdAt: new Date(),
+      steps: input.steps,
+      automationStatus: "draft",
+      enrolledCount: 0,
+      completedCount: 0,
+      createdAt: now,
+      updatedAt: now,
     });
 
     const automation = await db
@@ -80,11 +80,11 @@ export async function createAutomation(
   });
 }
 
-// ─── Toggle Active ───
+// ─── Toggle Status ───
 
 export async function toggleAutomation(
   automationId: string
-): Promise<ActionResult<{ isActive: boolean }>> {
+): Promise<ActionResult<{ automationStatus: string }>> {
   return safeAction(async () => {
     const session = await requirePermission("content:write");
     const { DB } = getBindings();
@@ -100,13 +100,13 @@ export async function toggleAutomation(
       throw new Error("Automation not found");
     }
 
-    const newStatus = !existing.isActive;
+    const newStatus = existing.automationStatus === "active" ? "paused" : "active";
     await db
       .update(automations)
-      .set({ isActive: newStatus })
+      .set({ automationStatus: newStatus, updatedAt: new Date() })
       .where(eq(automations.id, automationId));
 
-    return { isActive: newStatus };
+    return { automationStatus: newStatus };
   });
 }
 

@@ -9,9 +9,9 @@ import { Loader2, CheckCircle2, Download, FileText } from "lucide-react";
 interface LeadMagnetInfo {
   title: string;
   description: string | null;
-  type: string;
-  fileR2Key: string | null;
-  redirectUrl: string | null;
+  fileUrl: string;
+  fileType: string | null;
+  coverUrl: string | null;
 }
 
 export default function LeadMagnetPage() {
@@ -126,9 +126,9 @@ export default function LeadMagnetPage() {
           <p className="mt-2 text-muted-foreground">
             {magnet?.description ?? "Enter your email to get instant access."}
           </p>
-          {magnet?.type && (
+          {magnet?.fileType && (
             <span className="mt-3 inline-flex rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground uppercase">
-              {magnet.type}
+              {magnet.fileType}
             </span>
           )}
         </div>

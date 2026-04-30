@@ -24,17 +24,17 @@ import {
 
 const PLATFORM_META: Record<string, { label: string; color: string }> = {
   facebook: { label: "Facebook Group", color: "bg-blue-600" },
-  discord: { label: "Discord", color: "bg-indigo-600" },
   reddit: { label: "Reddit", color: "bg-orange-500" },
-  custom: { label: "Custom", color: "bg-gray-600" },
+  discord: { label: "Discord", color: "bg-indigo-600" },
+  slack: { label: "Slack", color: "bg-purple-600" },
 };
 
 const POST_TYPE_LABELS: Record<string, string> = {
-  discussion: "Discussion",
+  text: "Text",
+  image: "Image",
+  link: "Link",
   poll: "Poll",
-  announcement: "Announcement",
-  engagement_prompt: "Engagement Prompt",
-  event: "Event",
+  video: "Video",
 };
 
 export default function CommunitiesDashboard() {
@@ -171,7 +171,7 @@ export default function CommunitiesDashboard() {
                   <option value="facebook">Facebook Group</option>
                   <option value="discord">Discord Server</option>
                   <option value="reddit">Reddit Community</option>
-                  <option value="custom">Custom / Other</option>
+                  <option value="slack">Slack</option>
                 </select>
               </div>
               <div>
@@ -179,7 +179,7 @@ export default function CommunitiesDashboard() {
                   Platform Group ID (optional)
                 </label>
                 <input
-                  name="platformGroupId"
+                  name="platformId"
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground font-mono focus:border-ring focus:ring-1 focus:ring-ring"
                   placeholder="e.g. 123456789"
                 />
@@ -304,15 +304,9 @@ export default function CommunitiesDashboard() {
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">Growth</p>
-                      <p className="text-lg font-bold text-success">
-                        +{((selected.growthRate ?? 0) * 100).toFixed(1)}%
-                      </p>
-                    </div>
-                    <div>
                       <p className="text-xs text-muted-foreground">Posts</p>
                       <p className="text-lg font-bold text-foreground">
-                        {selected.posts.length}
+                        {selected.postCount ?? selected.posts.length}
                       </p>
                     </div>
                   </div>
@@ -342,14 +336,14 @@ export default function CommunitiesDashboard() {
                             Type
                           </label>
                           <select
-                            name="type"
+                            name="postType"
                             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
                           >
-                            <option value="discussion">Discussion</option>
+                            <option value="text">Text</option>
+                            <option value="image">Image</option>
+                            <option value="link">Link</option>
                             <option value="poll">Poll</option>
-                            <option value="announcement">Announcement</option>
-                            <option value="engagement_prompt">Engagement Prompt</option>
-                            <option value="event">Event</option>
+                            <option value="video">Video</option>
                           </select>
                         </div>
                         <div>
@@ -410,7 +404,7 @@ export default function CommunitiesDashboard() {
                             <div>
                               <div className="flex items-center gap-2 mb-1">
                                 <span className="text-xs font-medium text-muted-foreground">
-                                  {POST_TYPE_LABELS[post.type] ?? post.type}
+                                  {POST_TYPE_LABELS[post.postType] ?? post.postType}
                                 </span>
                                 <span
                                   className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -448,9 +442,9 @@ export default function CommunitiesDashboard() {
                               </button>
                             )}
                           </div>
-                          {(post.reactions ?? 0) > 0 || (post.comments ?? 0) > 0 ? (
+                          {(post.likes ?? 0) > 0 || (post.comments ?? 0) > 0 ? (
                             <div className="flex gap-3 mt-2 text-xs text-muted-foreground">
-                              <span>{post.reactions} reactions</span>
+                              <span>{post.likes} likes</span>
                               <span>{post.comments} comments</span>
                             </div>
                           ) : null}

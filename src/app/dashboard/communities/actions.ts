@@ -14,17 +14,16 @@ import type { Community, CommunityPost } from "@/lib/db/schema";
 
 const CreateCommunitySchema = z.object({
   name: z.string().min(1).max(200),
-  platform: z.enum(["facebook", "discord", "reddit", "custom"]),
-  platformGroupId: z.string().optional(),
+  platform: z.enum(["facebook", "reddit", "discord", "slack"]),
+  platformId: z.string().optional(),
   description: z.string().optional(),
 });
 
 const CreateCommunityPostSchema = z.object({
   communityId: z.string().min(1),
-  type: z.enum(["discussion", "poll", "announcement", "engagement_prompt", "event"]),
+  postType: z.enum(["text", "image", "link", "poll", "video"]),
   title: z.string().optional(),
   body: z.string().min(1).max(5000),
-  pollOptions: z.string().optional(), // JSON array
   scheduledFor: z.string().optional(),
 });
 
@@ -64,7 +63,7 @@ export async function listCommunities(): Promise<
         .all();
 
       const recentEngagement = posts.reduce(
-        (sum, p) => sum + (p.reactions ?? 0) + (p.comments ?? 0),
+        (sum, p) => sum + (p.likes ?? 0) + (p.comments ?? 0),
         0
       );
 
@@ -88,7 +87,7 @@ export async function createCommunity(
     const input = CreateCommunitySchema.parse({
       name: formData.get("name"),
       platform: formData.get("platform"),
-      platformGroupId: formData.get("platformGroupId") || undefined,
+      platformId: formData.get("platformId") || undefined,
       description: formData.get("description") || undefined,
     });
 
@@ -100,7 +99,7 @@ export async function createCommunity(
       platform: input.platform,
       name: input.name,
       description: input.description ?? null,
-      platformGroupId: input.platformGroupId ?? null,
+      platformId: input.platformId ?? null,
       communityStatus: "active",
       createdAt: new Date(),
     });
@@ -121,16 +120,15 @@ export async function createCommunityPost(
   formData: FormData
 ): Promise<ActionResult<CommunityPost>> {
   return safeAction(async () => {
-    await requirePermission("content:write");
+    const session = await requirePermission("content:write");
     const { DB } = getBindings();
     const db = createDb(DB);
 
     const input = CreateCommunityPostSchema.parse({
       communityId: formData.get("communityId"),
-      type: formData.get("type"),
+      postType: formData.get("postType"),
       title: formData.get("title") || undefined,
       body: formData.get("body"),
-      pollOptions: formData.get("pollOptions") || undefined,
       scheduledFor: formData.get("scheduledFor") || undefined,
     });
 
@@ -140,10 +138,10 @@ export async function createCommunityPost(
     await db.insert(communityPosts).values({
       id,
       communityId: input.communityId,
-      type: input.type,
+      workspaceId: session.workspaceId,
+      postType: input.postType,
       title: input.title ?? null,
       body: input.body,
-      pollOptions: input.pollOptions ?? null,
       postStatus: status,
       scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
       createdAt: new Date(),
