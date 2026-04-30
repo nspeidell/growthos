@@ -1,0 +1,133 @@
+name = "growthos"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Database ───
+[[d1_databases]]
+binding = "DB"
+database_name = "growthos-prod"
+database_id = "2b46db77-e682-45de-8205-b223246b7334"
+
+# ─── Object Storage ───
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "growthos-media"
+
+# ─── Key-Value Store ───
+[[kv_namespaces]]
+binding = "KV"
+id = "80d4197d04d144429f836a614acaca50"
+
+# ─── Queues ───
+[[queues.producers]]
+binding = "PUBLISH_QUEUE"
+queue = "growthos-publish"
+
+[[queues.producers]]
+binding = "MEDIA_QUEUE"
+queue = "growthos-media"
+
+[[queues.producers]]
+binding = "SWARM_QUEUE"
+queue = "growthos-swarm"
+
+[[queues.producers]]
+binding = "SIGNAL_QUEUE"
+queue = "growthos-signals"
+
+[[queues.consumers]]
+queue = "growthos-media"
+max_batch_size = 3
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "growthos-media-dlq"
+
+[[queues.consumers]]
+queue = "growthos-swarm"
+max_batch_size = 5
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "growthos-swarm-dlq"
+
+[[queues.consumers]]
+queue = "growthos-signals"
+max_batch_size = 3
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "growthos-signals-dlq"
+
+# ─── Environment Variables ───
+# Secrets via: wrangler secret put <NAME>
+# Required secrets (minimum for first deploy):
+#   wrangler secret put SESSION_SECRET
+#   wrangler secret put ENCRYPTION_KEY
+#   wrangler secret put GOOGLE_CLIENT_SECRET
+#   wrangler secret put ANTHROPIC_API_KEY
+#
+# Optional secrets (add as you enable features):
+#   wrangler secret put STRIPE_SECRET_KEY
+#   wrangler secret put STRIPE_WEBHOOK_SECRET
+#   wrangler secret put META_APP_ID
+#   wrangler secret put META_APP_SECRET
+#   wrangler secret put X_CLIENT_SECRET
+#   wrangler secret put REDDIT_CLIENT_ID
+#   wrangler secret put REDDIT_CLIENT_SECRET
+#   wrangler secret put REUNION_API_KEY
+#   wrangler secret put REUNION_WEBHOOK_SECRET
+#   wrangler secret put RESEND_API_KEY
+#   wrangler secret put ELEVEN_LABS_API_KEY
+#   wrangler secret put REPLICATE_API_TOKEN
+#   wrangler secret put CREATOMATE_API_KEY
+
+[vars]
+ENVIRONMENT = "development"
+APP_URL = "http://localhost:3000"
+
+# ─── Cron Triggers ───
+[triggers]
+crons = [
+  "* * * * *",       # Every minute: publish due posts, retry failures
+  "0 * * * *",       # Hourly: token refresh, metrics sync, competitor scan
+  "0 2 * * *",      # Daily 2am UTC: Swarm overnight mode
+  "0 3 * * *",      # Daily 3am UTC: Growth optimization auto-promote
+]
+
+# ═══════════════════════════════════════════
+# Production Environment Override
+# Deploy with: wrangler deploy --env production
+# ═══════════════════════════════════════════
+[env.production]
+name = "growthos-prod"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "growthos-prod"
+database_id = "2b46db77-e682-45de-8205-b223246b7334"
+
+[[env.production.r2_buckets]]
+binding = "BUCKET"
+bucket_name = "growthos-media"
+
+[[env.production.kv_namespaces]]
+binding = "KV"
+id = "80d4197d04d144429f836a614acaca50"
+
+[[env.production.queues.producers]]
+binding = "PUBLISH_QUEUE"
+queue = "growthos-publish"
+
+[[env.production.queues.producers]]
+binding = "MEDIA_QUEUE"
+queue = "growthos-media"
+
+[[env.production.queues.producers]]
+binding = "SWARM_QUEUE"
+queue = "growthos-swarm"
+
+[[env.production.queues.producers]]
+binding = "SIGNAL_QUEUE"
+queue = "growthos-signals"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+APP_URL = "https://growthos.pages.dev"

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "env": {
+    "NEXT_TELEMETRY_DISABLED": "1"
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-XSS-Protection", "value": "1; mode=block" }
+      ]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/lead-magnet/:slug",
+      "destination": "/lead-magnet/:slug"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/app",
+      "destination": "/",
+      "permanent": false
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/metrics-sync",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/ad-metrics-sync",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/swarm-overnight",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/optimize-check",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
