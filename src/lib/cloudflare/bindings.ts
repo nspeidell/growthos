@@ -30,6 +30,8 @@ export interface CloudflareEnv {
   // Phase 3: Social OAuth secrets
   META_APP_ID: string;
   META_APP_SECRET: string;
+  INSTAGRAM_APP_ID: string;
+  INSTAGRAM_APP_SECRET: string;
   X_CLIENT_ID: string;
   X_CLIENT_SECRET: string;
   REDDIT_CLIENT_ID: string;

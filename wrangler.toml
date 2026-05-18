@@ -130,4 +130,4 @@ queue = "growthos-signals"
 
 [env.production.vars]
 ENVIRONMENT = "production"
-APP_URL = "https://growthos.pages.dev"
+APP_URL = "https://growthos-eo1.pages.dev"

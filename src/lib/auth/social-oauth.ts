@@ -24,18 +24,16 @@ export interface PlatformOAuthConfig {
 export const PLATFORM_OAUTH_CONFIGS: Record<string, PlatformOAuthConfig> = {
   instagram: {
     platform: "instagram",
-    authUrl: "https://www.facebook.com/v21.0/dialog/oauth",
-    tokenUrl: "https://graph.facebook.com/v21.0/oauth/access_token",
+    // Instagram Business Login (2024+) uses instagram.com OAuth, not facebook.com
+    authUrl: "https://www.instagram.com/oauth/authorize",
+    tokenUrl: "https://api.instagram.com/oauth/access_token",
     scopes: [
-      "public_profile",
-      "pages_show_list",
-      "pages_manage_posts",
-      "pages_read_engagement",
       "instagram_business_basic",
-      "instagram_business_content_publish",
+      "instagram_manage_comments",
+      "instagram_business_manage_messages",
     ],
-    clientIdEnvKey: "META_APP_ID",
-    clientSecretEnvKey: "META_APP_SECRET",
+    clientIdEnvKey: "INSTAGRAM_APP_ID",
+    clientSecretEnvKey: "INSTAGRAM_APP_SECRET",
   },
   facebook: {
     platform: "facebook",
@@ -421,37 +419,20 @@ export async function fetchPlatformProfile(
 async function fetchInstagramProfile(
   accessToken: string
 ): Promise<PlatformProfile> {
-  // Get pages first, then find linked Instagram account
-  const pagesRes = await fetch(
-    `https://graph.facebook.com/v21.0/me/accounts?access_token=${accessToken}`
-  );
-  const pages = await pagesRes.json() as { data: Array<{ id: string }> };
-
-  if (!pages.data?.[0]) {
-    throw new Error("No Facebook Page found — Instagram Business requires a linked Page");
-  }
-
-  const pageId = pages.data[0].id;
-  const igRes = await fetch(
-    `https://graph.facebook.com/v21.0/${pageId}?fields=instagram_business_account&access_token=${accessToken}`
-  );
-  const igData = await igRes.json() as { instagram_business_account?: { id: string } };
-
-  if (!igData.instagram_business_account) {
-    throw new Error("No Instagram Business account linked to this Page");
-  }
-
-  const igId = igData.instagram_business_account.id;
+  // Instagram Business Login (2024+): token is scoped to the IG account directly
   const profileRes = await fetch(
-    `https://graph.facebook.com/v21.0/${igId}?fields=username,profile_picture_url&access_token=${accessToken}`
+    `https://graph.instagram.com/v21.0/me?fields=id,username,profile_picture_url&access_token=${accessToken}`
   );
   const profile = await profileRes.json() as {
+    id?: string;
     username?: string;
     profile_picture_url?: string;
   };
 
+  if (!profile.id) throw new Error("Failed to fetch Instagram profile");
+
   return {
-    platformAccountId: igId,
+    platformAccountId: profile.id,
     username: profile.username ?? "instagram_user",
     avatarUrl: profile.profile_picture_url,
   };
