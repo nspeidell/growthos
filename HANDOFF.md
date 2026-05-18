@@ -1,6 +1,6 @@
 # GrowthOS — Model Handoff Document
 
-**Date:** April 30, 2026
+**Date:** May 18, 2026
 **Owner:** Nick Speidell (reunionfamilychallenge@gmail.com)
 **Repo:** https://github.com/nspeidell/growthos.git (branch: master)
 **Live URL:** https://growthos.pages.dev
@@ -23,7 +23,7 @@ Nick is the sole founder — he wears the developer, marketer, and strategic lea
 
 **Backend:** 100% Cloudflare-native — Pages (hosting), D1 (SQLite database), R2 (object storage), KV (sessions), Queues (async jobs). **Never suggest Supabase, Vercel, or any non-Cloudflare backend services.** This is a hard constraint Nick has enforced repeatedly.
 
-**ORM:** Drizzle ORM with SQLite dialect. Schema lives in `src/lib/db/schema.ts` (1834 lines, covers all tables). 20 D1 migrations (0000–0019).
+**ORM:** Drizzle ORM with SQLite dialect. Schema lives in `src/lib/db/schema.ts` (1834 lines, covers all tables). 21 D1 migrations (0000–0020).
 
 **AI:** Anthropic Claude for content generation, SEO analysis, signal classification, and the Growth Swarm multi-agent system.
 
@@ -35,7 +35,7 @@ Nick is the sole founder — he wears the developer, marketer, and strategic lea
 
 **Billing:** Stripe (subscriptions, webhooks, checkout).
 
-**Testing:** Vitest for unit tests. Tests exist for auth middleware, team actions, automations, calendar, swarm agents/orchestrator, growth engine stats/decisions/insights.
+**Testing:** Vitest for unit tests. **291 tests across 17 files, all passing.** Covers: auth middleware, team/calendar/newsletter/publisher/automations actions, swarm agents/orchestrator, growth engine stats/decisions/insights.
 
 ---
 
@@ -92,8 +92,9 @@ growthos/
 │   │   ├── utils/            # API helpers, cn, crypto, validation
 │   │   └── video/            # ElevenLabs, brand style, trust analysis
 │   ├── types/                # Shared TypeScript types
-│   └── workers/              # 8 Cloudflare Workers
+│   └── workers/              # 9 Cloudflare Workers
 │       ├── ad-metrics-sync.ts
+│       ├── automation-processor.ts   # ← NEW: automation enrollment cron
 │       ├── competitor-scan.ts
 │       ├── media-gen.ts
 │       ├── metrics-sync.ts
@@ -101,7 +102,9 @@ growthos/
 │       ├── signal-scanner.ts
 │       ├── swarm.ts
 │       └── token-refresh.ts
-├── wrangler.toml             # Cloudflare config (D1, R2, KV, Queues, crons)
+├── wrangler.toml                       # Cloudflare config (D1, R2, KV, Queues, crons)
+├── wrangler.publisher.toml             # Publisher Worker config
+├── wrangler.automation-processor.toml # Automation Processor Worker config
 ├── package.json              # Scripts, deps
 ├── next.config.ts
 ├── drizzle.config.ts
@@ -109,7 +112,7 @@ growthos/
 └── vitest.config.ts
 ```
 
-**Total:** 201 source files (.ts/.tsx/.sql)
+**Total:** 213 source files (.ts/.tsx/.sql)
 
 ---
 
@@ -145,6 +148,7 @@ D1 (SQLite) with Drizzle ORM. 20 migrations covering ~40 tables organized by pha
 **Phase 5:** post_metrics, subscriptions, usage_records
 **Phase 6:** ad_campaigns, ad_variants, reunion_campaigns
 **Phase 7:** communities, community_posts, community_members, subscribers, newsletters, lead_magnets, automations
+**Phase 9 (migration 0020):** automation_enrollments — tracks per-subscriber progress through drip campaign steps
 **Phase 11:** swarm_agents, swarm_missions, swarm_tasks, swarm_logs
 **Phase 12:** growth_experiments, growth_variants, growth_events, growth_results, growth_insights, growth_audit_log
 **Phase 14:** listening_sources, tracked_keywords, signals, engagement_actions, signal_alerts
@@ -161,19 +165,17 @@ Tables that were recently fixed: communities, community_posts, community_members
 
 **Platform:** Cloudflare Pages (Direct Upload — NOT connected to Git)
 
-**Deploy command:**
+**Deploy commands:**
 ```bash
-npm run deploy
+npm run deploy                       # Pages app (Next.js)
+npm run deploy:publisher             # growthos-publisher Worker
+npm run deploy:automation-processor  # growthos-automation-processor Worker
+npm run ship                         # git commit + push + npm run deploy
 ```
 
-This runs: `next build` → `fix-manifests.js` → `@cloudflare/next-on-pages` → `wrangler pages deploy .vercel/output/static --project-name=growthos`
+`npm run deploy` runs: `next build` → `fix-manifests.js` → `@cloudflare/next-on-pages` → `wrangler pages deploy .vercel/output/static --project-name=growthos --branch=production`
 
-**Ship command (git + deploy):**
-```bash
-npm run ship
-```
-
-This runs: `git add -A && git commit -m "update" && git push && npm run deploy`
+**CRITICAL:** The `--branch=production` flag is required. Without it, Cloudflare treats the deploy as a Preview and the live URL shows stale code.
 
 **Important:** The Cloudflare Pages project "growthos" is a Direct Upload project. It CANNOT be connected to GitHub for auto-deploy — this is a Cloudflare platform limitation for Direct Upload projects. Deploys must be done via CLI.
 
@@ -188,10 +190,12 @@ wrangler d1 execute growthos-prod --remote --file=./src/lib/db/migrations/XXXX_n
 - KV namespace: ID `80d4197d04d144429f836a614acaca50`
 - Queues: growthos-publish, growthos-media, growthos-swarm, growthos-signals
 
-**Required secrets** (set via `wrangler secret put`):
-SESSION_SECRET, ENCRYPTION_KEY, GOOGLE_CLIENT_SECRET, ANTHROPIC_API_KEY
+**Pages secrets** (set via `wrangler pages secret put --project-name=growthos`):
+SESSION_SECRET, ENCRYPTION_KEY, GOOGLE_CLIENT_SECRET, ANTHROPIC_API_KEY, RESEND_API_KEY, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, META_APP_ID, META_APP_SECRET, X_CLIENT_ID, X_CLIENT_SECRET, REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REUNION_API_KEY, REUNION_WEBHOOK_SECRET, ELEVEN_LABS_API_KEY, REPLICATE_API_TOKEN, CREATOMATE_API_KEY
 
-**Optional secrets:** STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, META_APP_ID, META_APP_SECRET, X_CLIENT_SECRET, REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REUNION_API_KEY, REUNION_WEBHOOK_SECRET, RESEND_API_KEY, ELEVEN_LABS_API_KEY, REPLICATE_API_TOKEN, CREATOMATE_API_KEY
+**Publisher Worker secret:** ENCRYPTION_KEY (same value as Pages — required for token decryption)
+
+**Automation Processor Worker secret:** RESEND_API_KEY (same value as Pages)
 
 ---
 
@@ -202,6 +206,24 @@ SESSION_SECRET, ENCRYPTION_KEY, GOOGLE_CLIENT_SECRET, ANTHROPIC_API_KEY
 - Fixed deploy script (was missing `@cloudflare/next-on-pages` step)
 - Code quality cleanup: zero `as any` casts, zero debug console.log, zero empty catch blocks
 - GitHub repo initialized and pushed to github.com/nspeidell/growthos.git
+
+### Completed — Session 3 (May 2026, Sonnet)
+
+- **Full test suite verified** — 291 tests across 17 test files, all passing. Fixed 19 test failures: `null` coercion bug in `publisher/actions.ts` (Zod rejects `null` from `formData.get()`), Vitest mock queue leakage (replaced `vi.clearAllMocks()` with `mockDb.get.mockReset()` in every `beforeEach`), stale permission counts in `middleware.test.ts`, and `ContentAgent` making live API calls (added `vi.mock("@/lib/ai/claude")`).
+
+- **Visual step builder** — Replaced raw JSON textarea in `automations-dashboard.tsx` with a full drag-and-drop-style step editor. Supports `send_email` (from/subject/body fields), `wait` (hours input with human-readable label), and `add_tag` (tag input). Validates before save.
+
+- **Automation enrollment pipeline** — Full end-to-end drip campaign execution:
+  - `POST /api/subscribe` calls `enrollSubscriber()` after creating a subscriber
+  - `src/lib/automations/enroll.ts` queries active automations matching trigger type, inserts rows into `automation_enrollments` with `current_step = 0`
+  - Migration `0020_automations_engine.sql` applied to prod D1 — creates `automation_enrollments` table with `UNIQUE(automation_id, subscriber_id)` double-enroll guard
+  - `src/app/api/cron/automations/route.ts` — Next.js API route for manual/test invocation
+
+- **Automation Processor Worker deployed** — `growthos-automation-processor` is a standalone Cloudflare Worker running every minute. Config: `wrangler.automation-processor.toml`. Reads `automation_enrollments` via 3-way JOIN, executes step types (`send_email` → Resend API, `wait` → sets `next_step_at`, `add_tag` → updates subscriber tags JSON), advances `current_step`, marks `completed` on last step. Handles errors by marking `failed` with `error_message`. Batch: 50 enrollments per tick.
+
+- **Dashboard module rewrites** — All 19 dashboard modules have been rebuilt with the design system (shadcn/ui, consistent dark mode, mobile-first). Modules: content, publisher, calendar, seo, competitors, analytics, billing, ads, automations, newsletter, funnels, media, swarm, signals, experiments, communities, reunion, team, settings (Brand Vault + Voices).
+
+- **DEPLOY.md rewritten** — Removed all stale Vercel references. Now accurately documents the Cloudflare Pages + Workers architecture, all deploy commands, and secrets setup.
 
 ### Completed — Session 2 (April 30, 2026, Sonnet)
 - **Fixed production deploy** — All prior deploys were landing as Preview. Root cause: `wrangler pages deploy` without `--branch=production` defaults to preview. Fixed by adding `--branch=production` to the deploy script in `package.json`.
@@ -236,6 +258,16 @@ npm run ship
 - **Queue:** consumes growthos-publish, calls platform adapters, marks posts published/failed
 - **Retries:** up to 3 with exponential backoff (30s, 60s, 120s)
 
+### Automation Processor Worker Details
+- **Name:** `growthos-automation-processor`
+- **Config:** `wrangler.automation-processor.toml`
+- **Bindings:** DB (growthos-prod)
+- **Secret needed:** RESEND_API_KEY (same value as Pages project)
+- **Cron:** every minute — scans `automation_enrollments` for status=active AND (next_step_at IS NULL OR next_step_at <= now)
+- **Step types:** `send_email` (Resend API, supports `{{name}}` merge tag), `wait` (sets next_step_at), `add_tag` (updates subscriber tags JSON)
+- **Batch:** 50 enrollments per tick
+- **Error handling:** any exception marks enrollment as failed with error_message stored in DB
+
 ### Platform Publishing Status
 | Platform | Adapter | Secrets | Account Connected | Notes |
 |----------|---------|---------|-------------------|-------|
@@ -262,16 +294,17 @@ CREATOMATE_TPL_QUOTE = "..."     # Quote card
 ```
 
 ### Known Issues / Technical Debt
-- The `build` script runs `next build && node scripts/fix-manifests.js` — `fix-manifests.js` patches Next.js manifest output for Cloudflare Pages compatibility. Purpose is understood but not formally documented.
+- `fix-manifests.js` — patches Next.js manifest output for Cloudflare Pages compatibility. Runs as part of every build. Purpose is understood but not formally documented.
 - No CI/CD pipeline — deploys are manual CLI commands. `.github/workflows/` was removed because the GitHub PAT lacked the `workflow` scope.
-- Test suite exists but not verified end-to-end in current state.
 - Community post publishing (Facebook Groups) marks posts as published in DB but does not call the Facebook Groups API — pending Meta App review for `publish_to_groups` permission.
 - Growth Swarm and Social Listening are fully coded but untested against live data.
 - `growthos-v2` duplicate Pages project still exists in Cloudflare dashboard — safe to delete.
+- Automation email body is sent as raw HTML/text — no unsubscribe link injected. Fine for now; add footer injection to `automation-processor.ts` before scaling sends.
 
 ### What Needs to Happen Next
+- **End-to-end automation test** — Create an automation, subscribe a test email, verify email arrives within 60 seconds
 - **End-to-end publish test** — Schedule a post to X, approve it, verify it fires within 60 seconds
-- **Creatomate templates** — Create templates in Creatomate dashboard, add IDs to wrangler.toml vars, redeploy
+- **Creatomate templates** — Create templates in Creatomate dashboard, add IDs to `wrangler.toml` vars section, redeploy
 - **Reddit** — Add `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` secrets once app is approved
 - **Instagram** — Will activate automatically once Meta App review approves publishing permissions
 - **Reunion app** — The companion family platform GrowthOS is designed to market. Reunion API bridge exists but the Reunion app itself is a separate project.
