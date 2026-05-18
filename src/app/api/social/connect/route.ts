@@ -68,12 +68,14 @@ export async function GET(request: NextRequest) {
   const redirectUri = `${env.APP_URL}/api/social/callback/${platform}`;
 
   // Build auth URL
+  const scopeSep = config.scopeSeparator ?? " ";
   const params = new URLSearchParams({
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: config.scopes.join(" "),
+    scope: config.scopes.join(scopeSep),
     state,
+    ...(config.extraParams ?? {}),
   });
 
   // PKCE for X/Twitter

@@ -17,6 +17,8 @@ export interface PlatformOAuthConfig {
   authUrl: string;
   tokenUrl: string;
   scopes: string[];
+  scopeSeparator?: string;          // defaults to " "; Instagram needs ","
+  extraParams?: Record<string, string>; // additional static params appended to auth URL
   clientIdEnvKey: string;
   clientSecretEnvKey: string;
 }
@@ -24,14 +26,18 @@ export interface PlatformOAuthConfig {
 export const PLATFORM_OAUTH_CONFIGS: Record<string, PlatformOAuthConfig> = {
   instagram: {
     platform: "instagram",
-    // Instagram Business Login (2024+) uses instagram.com OAuth, not facebook.com
+    // Instagram Business Login (2024+) — scopes must be comma-separated
     authUrl: "https://www.instagram.com/oauth/authorize",
     tokenUrl: "https://api.instagram.com/oauth/access_token",
     scopes: [
       "instagram_business_basic",
-      "instagram_manage_comments",
+      "instagram_business_content_publish",
       "instagram_business_manage_messages",
+      "instagram_business_manage_comments",
+      "instagram_business_manage_insights",
     ],
+    scopeSeparator: ",",
+    extraParams: { enable_fb_login: "0", force_authentication: "1" },
     clientIdEnvKey: "INSTAGRAM_APP_ID",
     clientSecretEnvKey: "INSTAGRAM_APP_SECRET",
   },
