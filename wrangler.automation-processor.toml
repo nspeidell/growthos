@@ -1,0 +1,20 @@
+name = "growthos-automation-processor"
+main = "src/workers/automation-processor.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Database ───
+[[d1_databases]]
+binding = "DB"
+database_name = "growthos-prod"
+database_id = "2b46db77-e682-45de-8205-b223246b7334"
+
+# ─── Cron: process due automation steps every minute ───
+[triggers]
+crons = ["* * * * *"]
+
+# ─── Secrets ───
+# Set once via CLI (use the same value as the Pages project):
+#   wrangler secret put RESEND_API_KEY --config wrangler.automation-processor.toml
+#
+# No other secrets needed — this worker only reads D1 and calls Resend.

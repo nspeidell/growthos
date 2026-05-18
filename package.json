@@ -19,6 +19,7 @@
     "db:migrate:prod": "wrangler d1 execute growthos-prod --remote --file=./src/lib/db/migrations/0000_init.sql",
     "deploy": "npm run build && npx @cloudflare/next-on-pages && npx wrangler pages deploy .vercel/output/static --project-name=growthos --branch=production",
     "deploy:publisher": "wrangler deploy --config wrangler.publisher.toml",
+    "deploy:automation-processor": "wrangler deploy --config wrangler.automation-processor.toml",
     "ship": "git add -A && git commit -m \"update\" && git push && npm run deploy"
   },
   "dependencies": {
