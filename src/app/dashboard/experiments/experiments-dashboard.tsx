@@ -12,12 +12,12 @@ import type {
 // ─── Status Colors ──────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, { bg: string; text: string; dot: string }> = {
-  active: { bg: "bg-emerald-950 border-emerald-800", text: "text-emerald-400", dot: "bg-emerald-400 animate-pulse" },
-  draft: { bg: "bg-zinc-800 border-zinc-700", text: "text-zinc-400", dot: "bg-zinc-400" },
-  paused: { bg: "bg-amber-950 border-amber-800", text: "text-amber-400", dot: "bg-amber-400" },
-  won: { bg: "bg-blue-950 border-blue-800", text: "text-blue-400", dot: "bg-blue-400" },
-  lost: { bg: "bg-red-950 border-red-800", text: "text-red-400", dot: "bg-red-400" },
-  archived: { bg: "bg-zinc-900 border-zinc-700", text: "text-zinc-500", dot: "bg-zinc-500" },
+  active: { bg: "bg-emerald-950/60 border-emerald-800", text: "text-emerald-400", dot: "bg-emerald-400 animate-pulse" },
+  draft: { bg: "bg-muted border-border", text: "text-muted-foreground", dot: "bg-muted-foreground" },
+  paused: { bg: "bg-amber-950/60 border-amber-800", text: "text-amber-400", dot: "bg-amber-400" },
+  won: { bg: "bg-blue-950/60 border-blue-800", text: "text-blue-400", dot: "bg-blue-400" },
+  lost: { bg: "bg-destructive/10 border-destructive/30", text: "text-destructive", dot: "bg-destructive" },
+  archived: { bg: "bg-muted/50 border-border", text: "text-muted-foreground", dot: "bg-muted-foreground" },
 };
 
 const MODULE_COLORS: Record<string, string> = {
@@ -44,15 +44,6 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 1) return "just now";
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -86,18 +77,22 @@ export function ExperimentsDashboard({
       </div>
 
       {/* ─── Tab Navigation ───────────────────────────────────────────── */}
-      <div className="flex gap-1 rounded-lg bg-zinc-900 p-1 border border-zinc-800">
+      <div className="flex gap-1 rounded-lg bg-muted p-1 border border-border">
         {(["active", "wins", "insights"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`flex-1 rounded-md px-3 py-2 text-xs font-mono uppercase tracking-wider transition-all ${
               activeTab === tab
-                ? "bg-zinc-800 text-zinc-100 shadow-sm"
-                : "text-zinc-500 hover:text-zinc-300"
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {tab === "active" ? `Active (${data.activeExperiments.length})` : tab === "wins" ? `Wins (${data.weeklyWins.length})` : `Insights (${data.recentInsights.length})`}
+            {tab === "active"
+              ? `Active (${data.activeExperiments.length})`
+              : tab === "wins"
+              ? `Wins (${data.weeklyWins.length})`
+              : `Insights (${data.recentInsights.length})`}
           </button>
         ))}
       </div>
@@ -112,13 +107,9 @@ export function ExperimentsDashboard({
         />
       )}
 
-      {activeTab === "wins" && (
-        <WeeklyWinsPanel wins={data.weeklyWins} />
-      )}
+      {activeTab === "wins" && <WeeklyWinsPanel wins={data.weeklyWins} />}
 
-      {activeTab === "insights" && (
-        <InsightsPanel insights={data.recentInsights} />
-      )}
+      {activeTab === "insights" && <InsightsPanel insights={data.recentInsights} />}
     </div>
   );
 }
@@ -129,35 +120,35 @@ function RevenueImpactStrip({ data }: { data: ExperimentsDashboardData }) {
   const { revenueImpact } = data;
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-gradient-to-r from-zinc-900 via-zinc-900 to-emerald-950/20 p-4 sm:p-6">
+    <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
       <div className="mb-3 flex items-center gap-2">
         <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-        <span className="text-xs font-mono uppercase tracking-wider text-zinc-400">Revenue Impact</span>
+        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">Revenue Impact</span>
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
-          <p className="text-2xl font-bold text-zinc-100 font-mono">
+          <p className="text-2xl font-bold text-foreground font-mono">
             {formatCents(revenueImpact.totalRevenueGainCents)}
           </p>
-          <p className="text-xs text-zinc-500">Revenue Gained</p>
+          <p className="text-xs text-muted-foreground">Revenue Gained</p>
         </div>
         <div>
           <p className="text-2xl font-bold text-emerald-400 font-mono">
             {formatPercent(revenueImpact.totalConversionLift)}
           </p>
-          <p className="text-xs text-zinc-500">Conversion Lift</p>
+          <p className="text-xs text-muted-foreground">Conversion Lift</p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-zinc-100 font-mono">
+          <p className="text-2xl font-bold text-foreground font-mono">
             {revenueImpact.experimentsWon}
           </p>
-          <p className="text-xs text-zinc-500">Experiments Won</p>
+          <p className="text-xs text-muted-foreground">Experiments Won</p>
         </div>
         <div>
-          <p className="text-2xl font-bold text-zinc-100 font-mono">
+          <p className="text-2xl font-bold text-foreground font-mono">
             {formatCents(revenueImpact.totalSpendSavedCents)}
           </p>
-          <p className="text-xs text-zinc-500">Spend Saved</p>
+          <p className="text-xs text-muted-foreground">Spend Saved</p>
         </div>
       </div>
     </div>
@@ -181,12 +172,12 @@ function StatCard({
     purple: "text-purple-400",
     amber: "text-amber-400",
   };
-  const textColor = accent ? colors[accent] : "text-zinc-100";
+  const textColor = accent ? colors[accent] : "text-foreground";
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+    <div className="rounded-lg border border-border bg-card p-3">
       <p className={`text-xl font-bold font-mono ${textColor}`}>{value}</p>
-      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
     </div>
   );
 }
@@ -206,12 +197,12 @@ function ActiveExperimentsPanel({
 }) {
   if (experiments.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-8 text-center">
-        <div className="mx-auto mb-3 h-12 w-12 rounded-full bg-zinc-800 flex items-center justify-center">
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <div className="mx-auto mb-3 h-12 w-12 rounded-full bg-muted flex items-center justify-center">
           <span className="text-xl">🧪</span>
         </div>
-        <p className="text-sm text-zinc-400">No active experiments</p>
-        <p className="text-xs text-zinc-600 mt-1">Create one to start optimizing</p>
+        <p className="text-sm text-muted-foreground">No active experiments</p>
+        <p className="text-xs text-muted-foreground/60 mt-1">Create one to start optimizing</p>
       </div>
     );
   }
@@ -246,23 +237,23 @@ function ExperimentCard({
 }) {
   const { experiment, variants, totalImpressions, liftPercent, confidenceScore, daysRunning, leadingVariant } = summary;
   const status = STATUS_BADGE[experiment.status] ?? STATUS_BADGE["draft"]!;
-  const moduleColor = MODULE_COLORS[experiment.moduleSource] ?? "text-zinc-400";
+  const moduleColor = MODULE_COLORS[experiment.moduleSource] ?? "text-muted-foreground";
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 overflow-hidden">
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-zinc-800/50">
+      <div className="flex items-center justify-between p-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className={`text-xs font-mono uppercase ${moduleColor}`}>{experiment.moduleSource}</div>
-          <h3 className="text-sm font-medium text-zinc-100">{experiment.name}</h3>
+          <h3 className="text-sm font-medium text-foreground">{experiment.name}</h3>
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-mono border ${status.bg} ${status.text}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
             {experiment.status.toUpperCase()}
           </span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
           <span>{daysRunning}d running</span>
-          <span className="text-zinc-700">|</span>
+          <span className="text-border">|</span>
           <span>{formatNumber(totalImpressions)} impr</span>
         </div>
       </div>
@@ -277,7 +268,7 @@ function ExperimentCard({
       </div>
 
       {/* Footer Metrics */}
-      <div className="flex items-center justify-between border-t border-zinc-800/50 px-4 py-3">
+      <div className="flex items-center justify-between border-t border-border px-4 py-3">
         <div className="flex items-center gap-4">
           <MetricPill label="Lift" value={formatPercent(liftPercent)} positive={liftPercent > 0} />
           <MetricPill label="Confidence" value={`${(confidenceScore * 100).toFixed(0)}%`} />
@@ -306,25 +297,25 @@ function VariantRow({ variant, totalImpressions }: { variant: VariantPerformance
   const convRate = (variant.conversionRate * 100).toFixed(2);
 
   return (
-    <div className="flex items-center gap-3 rounded-lg bg-zinc-800/30 p-2.5">
+    <div className="flex items-center gap-3 rounded-lg bg-muted/40 p-2.5">
       {/* Label + Control Badge */}
       <div className="flex items-center gap-2 w-32 shrink-0">
-        <span className={`text-sm font-medium ${variant.isLeading ? "text-emerald-400" : "text-zinc-300"}`}>
+        <span className={`text-sm font-medium ${variant.isLeading ? "text-emerald-400" : "text-foreground"}`}>
           {variant.label}
         </span>
         {variant.isControl && (
-          <span className="rounded bg-zinc-700 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400">CTRL</span>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">CTRL</span>
         )}
         {variant.isLeading && (
-          <span className="rounded bg-emerald-900 px-1.5 py-0.5 text-[10px] font-mono text-emerald-400">LEAD</span>
+          <span className="rounded bg-emerald-900/60 px-1.5 py-0.5 text-[10px] font-mono text-emerald-400">LEAD</span>
         )}
       </div>
 
       {/* Progress Bar */}
       <div className="flex-1">
-        <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+        <div className="h-2 rounded-full bg-muted overflow-hidden">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${variant.isLeading ? "bg-emerald-500" : "bg-zinc-600"}`}
+            className={`h-full rounded-full transition-all duration-500 ${variant.isLeading ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
             style={{ width: `${Math.min(fillPercent, 100)}%` }}
           />
         </div>
@@ -332,9 +323,9 @@ function VariantRow({ variant, totalImpressions }: { variant: VariantPerformance
 
       {/* Metrics */}
       <div className="flex items-center gap-4 text-xs font-mono shrink-0">
-        <span className="text-zinc-400">{formatNumber(variant.impressions)} impr</span>
-        <span className="text-zinc-300">{convRate}% CVR</span>
-        <span className="text-zinc-500">{variant.allocationPercent}% traffic</span>
+        <span className="text-muted-foreground">{formatNumber(variant.impressions)} impr</span>
+        <span className="text-foreground">{convRate}% CVR</span>
+        <span className="text-muted-foreground">{variant.allocationPercent}% traffic</span>
       </div>
     </div>
   );
@@ -345,9 +336,9 @@ function VariantRow({ variant, totalImpressions }: { variant: VariantPerformance
 function WeeklyWinsPanel({ wins }: { wins: WeeklyWin[] }) {
   if (wins.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-8 text-center">
-        <p className="text-sm text-zinc-400">No wins this week yet</p>
-        <p className="text-xs text-zinc-600 mt-1">Keep experiments running to accumulate learnings</p>
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <p className="text-sm text-muted-foreground">No wins this week yet</p>
+        <p className="text-xs text-muted-foreground/60 mt-1">Keep experiments running to accumulate learnings</p>
       </div>
     );
   }
@@ -357,18 +348,18 @@ function WeeklyWinsPanel({ wins }: { wins: WeeklyWin[] }) {
       {wins.map((win) => (
         <div
           key={`${win.experimentId}-${win.resolvedAt}`}
-          className="flex items-center justify-between rounded-xl border border-zinc-800 bg-zinc-900/50 p-4"
+          className="flex items-center justify-between rounded-xl border border-border bg-card p-4"
         >
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full bg-emerald-950 border border-emerald-800 flex items-center justify-center">
+            <div className="h-8 w-8 rounded-full bg-emerald-950/60 border border-emerald-800 flex items-center justify-center">
               <span className="text-emerald-400 text-sm">✓</span>
             </div>
             <div>
-              <p className="text-sm font-medium text-zinc-100">{win.experimentName}</p>
-              <p className="text-xs text-zinc-500">
-                Winner: <span className="text-zinc-300">{win.winningLabel}</span>
-                <span className="mx-1.5 text-zinc-700">·</span>
-                <span className={MODULE_COLORS[win.moduleSource] ?? "text-zinc-400"}>{win.moduleSource}</span>
+              <p className="text-sm font-medium text-foreground">{win.experimentName}</p>
+              <p className="text-xs text-muted-foreground">
+                Winner: <span className="text-foreground">{win.winningLabel}</span>
+                <span className="mx-1.5 text-border">·</span>
+                <span className={MODULE_COLORS[win.moduleSource] ?? "text-muted-foreground"}>{win.moduleSource}</span>
               </p>
             </div>
           </div>
@@ -376,7 +367,7 @@ function WeeklyWinsPanel({ wins }: { wins: WeeklyWin[] }) {
             <p className="text-sm font-mono font-bold text-emerald-400">
               {formatPercent(win.liftPercent)}
             </p>
-            <p className="text-xs text-zinc-500 font-mono">
+            <p className="text-xs text-muted-foreground font-mono">
               {formatCents(win.revenueGainCents)} gained
             </p>
           </div>
@@ -391,9 +382,9 @@ function WeeklyWinsPanel({ wins }: { wins: WeeklyWin[] }) {
 function InsightsPanel({ insights }: { insights: GrowthInsight[] }) {
   if (insights.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-8 text-center">
-        <p className="text-sm text-zinc-400">No insights generated yet</p>
-        <p className="text-xs text-zinc-600 mt-1">Insights emerge from completed experiments</p>
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <p className="text-sm text-muted-foreground">No insights generated yet</p>
+        <p className="text-xs text-muted-foreground/60 mt-1">Insights emerge from completed experiments</p>
       </div>
     );
   }
@@ -410,27 +401,24 @@ function InsightsPanel({ insights }: { insights: GrowthInsight[] }) {
   return (
     <div className="space-y-3">
       {insights.map((insight) => (
-        <div
-          key={insight.id}
-          className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4"
-        >
+        <div key={insight.id} className="rounded-xl border border-border bg-card p-4">
           <div className="flex items-start gap-3">
             <span className="text-lg">{categoryIcons[insight.category] ?? "💡"}</span>
             <div className="flex-1">
-              <p className="text-sm text-zinc-200">{insight.finding}</p>
-              <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500 font-mono">
-                <span className={MODULE_COLORS[insight.moduleSource ?? ""] ?? "text-zinc-400"}>
+              <p className="text-sm text-foreground">{insight.finding}</p>
+              <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground font-mono">
+                <span className={MODULE_COLORS[insight.moduleSource ?? ""] ?? "text-muted-foreground"}>
                   {insight.moduleSource ?? "general"}
                 </span>
-                <span className="text-zinc-700">|</span>
+                <span className="text-border">|</span>
                 <span>Confidence: {(insight.confidenceScore * 100).toFixed(0)}%</span>
                 {insight.liftPercent != null && (
                   <>
-                    <span className="text-zinc-700">|</span>
+                    <span className="text-border">|</span>
                     <span className="text-emerald-400">{formatPercent(insight.liftPercent)} lift</span>
                   </>
                 )}
-                <span className="text-zinc-700">|</span>
+                <span className="text-border">|</span>
                 <span>Validated {insight.timesValidated}x</span>
               </div>
             </div>
@@ -446,8 +434,8 @@ function InsightsPanel({ insights }: { insights: GrowthInsight[] }) {
 function MetricPill({ label, value, positive }: { label: string; value: string; positive?: boolean }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-xs text-zinc-500">{label}</span>
-      <span className={`text-xs font-mono font-medium ${positive === true ? "text-emerald-400" : positive === false ? "text-red-400" : "text-zinc-300"}`}>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={`text-xs font-mono font-medium ${positive === true ? "text-emerald-400" : positive === false ? "text-destructive" : "text-foreground"}`}>
         {value}
       </span>
     </div>
@@ -456,9 +444,9 @@ function MetricPill({ label, value, positive }: { label: string; value: string; 
 
 function ActionButton({ label, onClick, color }: { label: string; onClick: () => void; color: "emerald" | "amber" | "red" }) {
   const styles = {
-    emerald: "bg-emerald-950 border-emerald-800 text-emerald-400 hover:bg-emerald-900",
-    amber: "bg-amber-950 border-amber-800 text-amber-400 hover:bg-amber-900",
-    red: "bg-red-950 border-red-800 text-red-400 hover:bg-red-900",
+    emerald: "bg-emerald-950/60 border-emerald-800 text-emerald-400 hover:bg-emerald-900/60",
+    amber: "bg-amber-950/60 border-amber-800 text-amber-400 hover:bg-amber-900/60",
+    red: "bg-destructive/10 border-destructive/30 text-destructive hover:bg-destructive/20",
   };
 
   return (

@@ -244,6 +244,58 @@ ${post.metrics ? `Metrics: ${post.metrics}` : ""}`,
   });
 }
 
+// ─── Generate Content Opportunity ───
+
+export async function generateContentOpportunity(
+  postId: string
+): Promise<ActionResult<{ opportunity: string }>> {
+  return safeAction(async () => {
+    await requirePermission("analytics:write");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const post = await db
+      .select()
+      .from(competitorPosts)
+      .where(eq(competitorPosts.id, postId))
+      .get();
+
+    if (!post) throw new Error("Post not found");
+
+    const comp = await db
+      .select()
+      .from(competitors)
+      .where(eq(competitors.id, post.competitorId))
+      .get();
+
+    const raw = await generateWithClaude({
+      systemPrompt: `You are a content strategist for a growing brand. Given a competitor's post, generate a specific, actionable content brief that outperforms it. Return ONLY valid JSON (no markdown) with this structure:
+{
+  "hook": "Opening line or hook (max 15 words)",
+  "angle": "The unique angle or perspective we take",
+  "format": "Content format (e.g. carousel, short-form video, long-form article)",
+  "outline": ["Point 1", "Point 2", "Point 3"],
+  "cta": "Call to action",
+  "differentiator": "How this beats the competitor's version in one sentence"
+}`,
+      userMessage: `Competitor: ${comp?.name ?? "Unknown"} on ${comp?.platform ?? "unknown"}
+Niche: ${comp?.niche ?? "N/A"}
+
+Their post:
+${post.content}
+
+${post.aiAnalysis ? `Previous analysis:\n${post.aiAnalysis}` : ""}`,
+      maxTokens: 1024,
+      temperature: 0.7,
+    });
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("AI did not return valid JSON");
+
+    return { opportunity: jsonMatch[0] };
+  });
+}
+
 // ─── Gap Analysis (batch) ───
 
 export async function runGapAnalysis(): Promise<

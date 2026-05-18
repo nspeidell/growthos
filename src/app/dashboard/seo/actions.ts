@@ -366,6 +366,109 @@ export async function publishPage(
   });
 }
 
+// ─── Delete Page ───
+
+export async function deletePage(
+  pageId: string
+): Promise<ActionResult<{ deleted: boolean }>> {
+  return safeAction(async () => {
+    const session = await requirePermission("content:write");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const existing = await db
+      .select()
+      .from(pages)
+      .where(and(eq(pages.id, pageId), eq(pages.workspaceId, session.workspaceId)))
+      .get();
+
+    if (!existing) throw new Error("Page not found");
+    await db.delete(pages).where(eq(pages.id, pageId));
+    return { deleted: true };
+  });
+}
+
+// ─── AI Page Generation ───
+
+interface GeneratedPage {
+  title: string;
+  metaTitle: string;
+  metaDesc: string;
+  h1: string;
+  body: string;
+  schemaType: string;
+}
+
+export async function generatePageWithAI(
+  topic: string
+): Promise<ActionResult<GeneratedPage>> {
+  return safeAction(async () => {
+    await requirePermission("content:write");
+
+    const raw = await generateWithClaude({
+      systemPrompt: `You are an SEO content strategist. Generate a complete SEO-optimized page for the given topic.
+Return ONLY valid JSON (no markdown, no code blocks) with this exact structure:
+{
+  "title": "Page title (50-60 chars)",
+  "metaTitle": "Meta title (50-60 chars, include primary keyword)",
+  "metaDesc": "Meta description (140-155 chars, compelling, with CTA)",
+  "h1": "H1 heading (keyword-rich, engaging)",
+  "body": "Full page body in clean HTML using <h2>, <p>, <ul>, <li> tags. Minimum 400 words. Include FAQ section at end.",
+  "schemaType": "Article|FAQPage|HowTo|Product|Organization"
+}`,
+      userMessage: `Generate a complete SEO page for: "${topic}"`,
+      maxTokens: 3000,
+      temperature: 0.5,
+    });
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("AI did not return valid JSON");
+    return JSON.parse(jsonMatch[0]) as GeneratedPage;
+  });
+}
+
+// ─── Create Keyword From AI Suggestion ───
+
+export async function createKeywordFromSuggestion(opts: {
+  phrase: string;
+  intent: string;
+  difficulty: string;
+}): Promise<ActionResult<Keyword>> {
+  return safeAction(async () => {
+    const session = await requirePermission("content:write");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const difficultyMap: Record<string, number> = { low: 20, medium: 55, high: 80 };
+    const numericDifficulty = difficultyMap[opts.difficulty] ?? 50;
+
+    const validIntents = ["informational", "navigational", "transactional", "commercial"];
+    const intent = validIntents.includes(opts.intent)
+      ? (opts.intent as "informational" | "navigational" | "transactional" | "commercial")
+      : undefined;
+
+    const id = createId();
+    const now = new Date();
+
+    await db.insert(keywords).values({
+      id,
+      workspaceId: session.workspaceId,
+      phrase: opts.phrase,
+      volume: null,
+      difficulty: numericDifficulty,
+      intent: intent ?? null,
+      cluster: null,
+      priority: "medium",
+      status: "research",
+      targetUrl: null,
+      createdAt: now,
+    });
+
+    const keyword = await db.select().from(keywords).where(eq(keywords.id, id)).get();
+    return keyword!;
+  });
+}
+
 // ─── Schema JSON Generator ───
 
 function generateSchemaJson(

@@ -112,16 +112,49 @@ async function publishToInstagram(
 async function publishToFacebook(
   payload: PublishPayload
 ): Promise<PublishResult> {
-  const { body, accessToken } = payload;
+  const { body, accessToken, metadata } = payload;
 
-  // Get managed pages
+  // Get managed pages via /me/accounts
   const pagesRes = await fetch(
-    `https://graph.facebook.com/v21.0/me/accounts?access_token=${accessToken}`
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token&access_token=${accessToken}`
   );
-  const pages = await pagesRes.json() as { data: Array<{ id: string; access_token: string }> };
-  const page = pages.data?.[0];
+  const pagesBody = await pagesRes.text();
+  let pages: { data?: Array<{ id: string; name: string; access_token: string }>; error?: { message: string; code: number } };
+  try { pages = JSON.parse(pagesBody); } catch { pages = {}; }
 
-  if (!page) throw new Error("No Facebook Page found");
+  if (pages.error) {
+    throw new Error(`Facebook Pages API error: ${pages.error.message} (code ${pages.error.code}) — check that pages_show_list permission was granted`);
+  }
+
+  let page = pages.data?.[0];
+
+  // Fallback for New Pages Experience: /me/accounts returns empty for NPE pages.
+  // Try fetching the page token directly using the stored platform_account_id.
+  if (!page && metadata?._accountId) {
+    const pageId = metadata._accountId as string;
+    const directRes = await fetch(
+      `https://graph.facebook.com/v21.0/${pageId}?fields=id,name,access_token&access_token=${accessToken}`
+    );
+    const directData = await directRes.json() as {
+      id?: string;
+      name?: string;
+      access_token?: string;
+      error?: { message: string; code: number };
+    };
+    if (directData.access_token) {
+      page = { id: directData.id!, name: directData.name ?? pageId, access_token: directData.access_token };
+    } else if (directData.error) {
+      throw new Error(
+        `Facebook Page direct access failed for page ${pageId}: ${directData.error.message} (code ${directData.error.code})`
+      );
+    }
+  }
+
+  if (!page) {
+    throw new Error(
+      `No Facebook Page found — /me/accounts returned empty and no fallback page ID is configured. Raw: ${pagesBody.substring(0, 300)}`
+    );
+  }
 
   const res = await fetch(
     `https://graph.facebook.com/v21.0/${page.id}/feed`,
@@ -166,8 +199,43 @@ async function publishToYouTube(
 
 // ─── X / Twitter (v2 API) ───
 
+/**
+ * Extract the first publishable tweet from AI-generated content.
+ *
+ * The AI often generates a full thread as one body. For X we post only
+ * the first tweet (hook) to stay within the 280-character limit.
+ * Strategy:
+ *   1. If content fits in 280 chars, post as-is.
+ *   2. If it looks like a numbered thread (1/N, **1/N**, etc.), extract tweet 1.
+ *   3. Otherwise, take the first paragraph that fits.
+ *   4. Hard-truncate to 277 chars + "…" as a last resort.
+ */
+function extractFirstTweet(body: string): string {
+  const MAX = 280;
+  const cleaned = body.replace(/\*\*/g, "").trim();
+  if (cleaned.length <= MAX) return cleaned;
+
+  // Match numbered thread patterns: "1/N ...", "Tweet 1: ..."
+  const threadMatch = cleaned.match(/^(?:tweet\s*)?1\/\d+[:\s]*([\s\S]*?)(?=\n\s*\n|\n(?:tweet\s*)?\d+\/\d+|$)/im);
+  if (threadMatch) {
+    const tweet = threadMatch[1]?.trim() ?? "";
+    if (tweet.length > 0 && tweet.length <= MAX) return tweet;
+    if (tweet.length > MAX) return tweet.substring(0, 277) + "…";
+  }
+
+  // Take the first non-empty paragraph
+  const paragraphs = cleaned.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  for (const para of paragraphs) {
+    return para.length <= MAX ? para : para.substring(0, 277) + "…";
+  }
+
+  return cleaned.substring(0, 277) + "…";
+}
+
 async function publishToX(payload: PublishPayload): Promise<PublishResult> {
   const { body, accessToken } = payload;
+
+  const tweetText = extractFirstTweet(body);
 
   const res = await fetch("https://api.x.com/2/tweets", {
     method: "POST",
@@ -175,7 +243,7 @@ async function publishToX(payload: PublishPayload): Promise<PublishResult> {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ text: body }),
+    body: JSON.stringify({ text: tweetText }),
   });
 
   if (!res.ok) {

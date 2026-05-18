@@ -279,8 +279,9 @@ function QueueView({
   const activePosts = posts.filter(
     (p) => !["cancelled", "published"].includes(p.postStatus)
   );
+  const publishedPosts = posts.filter((p) => p.postStatus === "published");
 
-  if (activePosts.length === 0) {
+  if (activePosts.length === 0 && publishedPosts.length === 0) {
     return (
       <div className="text-center py-16">
         <Send className="w-12 h-12 text-neutral-300 mx-auto mb-4" />
@@ -295,7 +296,9 @@ function QueueView({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-6">
+      {activePosts.length > 0 && (
+      <div className="space-y-3">
       {activePosts.map((post) => {
         const platformInfo = PLATFORM_META[post.platform] ?? {
           label: post.platform,
@@ -400,6 +403,53 @@ function QueueView({
           </div>
         );
       })}
+      </div>
+      )}
+
+      {/* Published Posts */}
+      {publishedPosts.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-green-500" /> Published ({publishedPosts.length})
+          </h3>
+          {publishedPosts.map((post) => {
+            const platformInfo = PLATFORM_META[post.platform] ?? { label: post.platform, color: "bg-neutral-500", icon: "📱" };
+            return (
+              <div key={post.id} className="rounded-lg border border-green-100 bg-green-50/40 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white ${platformInfo.color}`}>
+                        <span>{platformInfo.icon}</span> {platformInfo.label}
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        <CheckCircle2 className="w-3 h-3" /> Published
+                      </span>
+                    </div>
+                    <p className="text-sm text-neutral-700 line-clamp-2">
+                      {post.contentAsset?.body?.substring(0, 200) ?? "Content"}
+                    </p>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-neutral-500">
+                      {post.account && <span>@{post.account.platformUsername}</span>}
+                      {post.publishedAt && (
+                        <span className="flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-green-500" />
+                          {new Date(post.publishedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {post.platformPostUrl && (
+                    <a href={post.platformPostUrl} target="_blank" rel="noopener noreferrer" className="text-brand-600 hover:text-brand-700 flex-shrink-0">
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -897,6 +947,44 @@ function ContentLibrary({ accounts, onScheduled }: { accounts: ConnectedAccount[
                             <Loader2 className="h-3 w-3 animate-spin" />
                           ) : null}
                           {asset.mediaJob.type === "video_composite" ? "Video" : "Image"}
+                        </span>
+                      )}
+                      {/* Publish Status Badge */}
+                      {asset.publishedPost && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                          asset.publishedPost.postStatus === "published"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : asset.publishedPost.postStatus === "failed"
+                            ? "bg-red-100 text-red-800"
+                            : asset.publishedPost.postStatus === "queued" || asset.publishedPost.postStatus === "publishing"
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-neutral-100 text-neutral-600"
+                        }`}>
+                          {asset.publishedPost.postStatus === "published" ? (
+                            <CheckCircle2 className="h-3 w-3" />
+                          ) : asset.publishedPost.postStatus === "failed" ? (
+                            <XCircle className="h-3 w-3" />
+                          ) : asset.publishedPost.postStatus === "publishing" ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Clock className="h-3 w-3" />
+                          )}
+                          {asset.publishedPost.postStatus === "published" ? "Published" :
+                           asset.publishedPost.postStatus === "failed" ? "Failed" :
+                           asset.publishedPost.postStatus === "queued" ? "Queued" :
+                           asset.publishedPost.postStatus === "publishing" ? "Publishing…" :
+                           asset.publishedPost.postStatus}
+                          {asset.publishedPost.postStatus === "published" && asset.publishedPost.platformPostUrl && (
+                            <a
+                              href={asset.publishedPost.platformPostUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="ml-0.5 hover:opacity-70"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
                         </span>
                       )}
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${

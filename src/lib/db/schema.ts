@@ -1189,12 +1189,40 @@ export const leadMagnetsRelations = relations(leadMagnets, ({ one }) => ({
   }),
 }));
 
-export const automationsRelations = relations(automations, ({ one }) => ({
+export const automationsRelations = relations(automations, ({ one, many }) => ({
   workspace: one(workspaces, {
     fields: [automations.workspaceId],
     references: [workspaces.id],
   }),
+  enrollments: many(automationEnrollments),
 }));
+
+// ─── AUTOMATION ENROLLMENTS ───
+
+export const automationEnrollments = sqliteTable("automation_enrollments", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  automationId: text("automation_id").notNull().references(() => automations.id, { onDelete: "cascade" }),
+  subscriberId: text("subscriber_id").notNull(),
+  workspaceId: text("workspace_id").notNull(),
+  currentStep: integer("current_step").notNull().default(0),
+  enrollmentStatus: text("enrollment_status", {
+    enum: ["active", "completed", "failed", "cancelled"],
+  }).notNull().default("active"),
+  nextStepAt: integer("next_step_at"),  // unix ms; null = run immediately
+  enrolledAt: integer("enrolled_at").notNull().$defaultFn(() => Date.now()),
+  completedAt: integer("completed_at"),
+  errorMessage: text("error_message"),
+});
+
+export const automationEnrollmentsRelations = relations(automationEnrollments, ({ one }) => ({
+  automation: one(automations, {
+    fields: [automationEnrollments.automationId],
+    references: [automations.id],
+  }),
+}));
+
+export type AutomationEnrollment = typeof automationEnrollments.$inferSelect;
+export type NewAutomationEnrollment = typeof automationEnrollments.$inferInsert;
 
 // ═══════════════════════════════════════════
 // Type Exports

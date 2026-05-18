@@ -1,10 +1,10 @@
 "use server";
 
-import { eq, desc, and, gte } from "drizzle-orm";
+import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { requirePermission } from "@/lib/auth/middleware";
 import { getBindings } from "@/lib/cloudflare/bindings";
 import { createDb } from "@/lib/db/client";
-import { postMetrics, scheduledPosts } from "@/lib/db/schema";
+import { postMetrics, scheduledPosts, subscribers } from "@/lib/db/schema";
 import { kvGet } from "@/lib/cloudflare/kv";
 import { safeAction, type ActionResult } from "@/lib/utils/api";
 import type { PostMetric, ScheduledPost } from "@/lib/db/schema";
@@ -209,5 +209,110 @@ export async function getPlatformComparison(): Promise<
         };
       }
     );
+  });
+}
+
+// ─── Get Subscriber Stats ───
+
+export interface SubscriberStats {
+  total: number;
+  active: number;
+  unsubscribed: number;
+  newThisPeriod: number;
+  bySource: Record<string, number>;
+}
+
+export async function getSubscriberStats(
+  days = 30
+): Promise<ActionResult<SubscriberStats>> {
+  return safeAction(async () => {
+    const session = await requirePermission("analytics:read");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const allSubs = await db
+      .select()
+      .from(subscribers)
+      .where(eq(subscribers.workspaceId, session.workspaceId))
+      .all();
+
+    const bySource: Record<string, number> = {};
+    let active = 0;
+    let unsubscribed = 0;
+    let newThisPeriod = 0;
+
+    for (const sub of allSubs) {
+      if (sub.subscriberStatus === "active") active++;
+      if (sub.subscriberStatus === "unsubscribed") unsubscribed++;
+
+      const src = sub.source ?? "manual";
+      bySource[src] = (bySource[src] ?? 0) + 1;
+
+      if (sub.subscribedAt && new Date(sub.subscribedAt) >= cutoff) {
+        newThisPeriod++;
+      }
+    }
+
+    return {
+      total: allSubs.length,
+      active,
+      unsubscribed,
+      newThisPeriod,
+      bySource,
+    };
+  });
+}
+
+// ─── Get Top Posts (by engagement rate) ───
+
+export async function getTopPosts(
+  days = 30,
+  limit = 10
+): Promise<ActionResult<PostWithMetrics[]>> {
+  return safeAction(async () => {
+    const session = await requirePermission("analytics:read");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const posts = await db
+      .select()
+      .from(scheduledPosts)
+      .where(
+        and(
+          eq(scheduledPosts.workspaceId, session.workspaceId),
+          eq(scheduledPosts.postStatus, "published"),
+          gte(scheduledPosts.publishedAt, cutoff)
+        )
+      )
+      .orderBy(desc(scheduledPosts.publishedAt))
+      .all();
+
+    const withMetrics: PostWithMetrics[] = [];
+
+    for (const post of posts) {
+      const metric = await db
+        .select()
+        .from(postMetrics)
+        .where(eq(postMetrics.postId, post.id))
+        .get();
+      withMetrics.push({ post, metrics: metric ?? null });
+    }
+
+    // Sort by engagement rate descending (posts with metrics first)
+    withMetrics.sort((a, b) => {
+      const rateA = a.metrics?.engagementRate
+        ? parseFloat(a.metrics.engagementRate)
+        : -1;
+      const rateB = b.metrics?.engagementRate
+        ? parseFloat(b.metrics.engagementRate)
+        : -1;
+      return rateB - rateA;
+    });
+
+    return withMetrics.slice(0, limit);
   });
 }

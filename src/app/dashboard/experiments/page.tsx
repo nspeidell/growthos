@@ -30,10 +30,10 @@ export default async function ExperimentsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-100">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
             Growth Optimization
           </h1>
-          <p className="text-sm text-zinc-400 font-mono">
+          <p className="text-sm text-muted-foreground font-mono">
             Experiment Engine &middot; Statistical Testing &middot; Auto-Optimize
           </p>
         </div>

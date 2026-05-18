@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Loader2,
   UserPlus,
+  Sparkles,
 } from "lucide-react";
 import {
   listSubscribers,
@@ -21,6 +22,7 @@ import {
   createNewsletter,
   sendNewsletter,
   deleteNewsletter,
+  generateNewsletterWithAI,
   type SubscriberStats,
 } from "./actions";
 import type { Subscriber, Newsletter } from "@/lib/db/schema";
@@ -31,8 +33,11 @@ export default function NewsletterDashboard() {
   const [nls, setNls] = useState<Newsletter[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState<"newsletters" | "subscribers" | "compose">("newsletters");
+  const [activeTab, setActiveTab] = useState<"compose" | "newsletters" | "subscribers">("newsletters");
   const [error, setError] = useState<string | null>(null);
+  const [aiTopic, setAiTopic] = useState("");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiFields, setAiFields] = useState<{ subject: string; previewText: string; body: string } | null>(null);
 
   useEffect(() => {
     load();
@@ -66,6 +71,8 @@ export default function NewsletterDashboard() {
       const result = await createNewsletter(formData);
       if (result.success) {
         setActiveTab("newsletters");
+        setAiFields(null);
+        setAiTopic("");
         await load();
       } else {
         setError(result.error ?? "Failed");
@@ -73,10 +80,27 @@ export default function NewsletterDashboard() {
     });
   }
 
+  async function handleAIGenerate() {
+    if (!aiTopic.trim()) return;
+    setAiGenerating(true);
+    setError(null);
+    const result = await generateNewsletterWithAI(aiTopic.trim());
+    setAiGenerating(false);
+    if (result.success && result.data) {
+      setAiFields(result.data);
+    } else if (!result.success) {
+      setError(result.error ?? "AI generation failed");
+    }
+  }
+
   function handleSend(id: string) {
     if (!confirm("Send this newsletter to all matching subscribers?")) return;
+    setError(null);
     startTransition(async () => {
-      await sendNewsletter(id);
+      const result = await sendNewsletter(id);
+      if (!result.success) {
+        setError(result.error ?? "Send failed — check that you have active subscribers and your Resend API key is set.");
+      }
       await load();
     });
   }
@@ -111,7 +135,7 @@ export default function NewsletterDashboard() {
 
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
-        {(["newsletters", "subscribers", "compose"] as const).map((tab) => (
+        {(["compose", "newsletters", "subscribers"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -136,19 +160,48 @@ export default function NewsletterDashboard() {
       {activeTab === "compose" && (
         <div className="rounded-xl border border-border bg-card p-6">
           <h3 className="text-lg font-semibold text-foreground mb-4">Compose Newsletter</h3>
+
+          {/* AI Generate */}
+          <div className="mb-5 rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <p className="text-xs font-medium text-primary mb-2">✦ AI Generate</p>
+            <div className="flex gap-2">
+              <input
+                value={aiTopic}
+                onChange={(e) => setAiTopic(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAIGenerate()}
+                className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
+                placeholder="e.g. tips for planning a family reunion this summer"
+              />
+              <button
+                type="button"
+                onClick={handleAIGenerate}
+                disabled={aiGenerating || !aiTopic.trim()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {aiGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {aiGenerating ? "Generating…" : "Generate"}
+              </button>
+            </div>
+            {aiFields && <p className="mt-2 text-xs text-primary">✓ Fields filled below — review and save draft</p>}
+          </div>
+
           <form action={handleCreateNewsletter} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Subject</label>
-                <input name="subject" required className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="Weekly Growth Update" />
+                <input key={aiFields?.subject} name="subject" required defaultValue={aiFields?.subject ?? ""} className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="Weekly Growth Update" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Preview Text</label>
-                <input name="previewText" className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="Shows in inbox preview" />
+                <input key={aiFields?.previewText} name="previewText" defaultValue={aiFields?.previewText ?? ""} className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="Shows in inbox preview" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">From Name</label>
-                <input name="fromName" className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="Nick at GrowthOS" />
+                <input name="fromName" className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="Nick at Reunion" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1">From Email</label>
+                <input name="fromEmail" type="email" className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring" placeholder="hello@reunionchallenge.com" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Target Tags (comma-separated)</label>
@@ -157,7 +210,7 @@ export default function NewsletterDashboard() {
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-1">Body (HTML supported)</label>
-              <textarea name="body" required rows={8} className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono focus:border-ring focus:ring-1 focus:ring-ring" placeholder="<p>Hey there!</p>" />
+              <textarea key={aiFields?.body} name="body" required rows={8} defaultValue={aiFields?.body ?? ""} className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono focus:border-ring focus:ring-1 focus:ring-ring" placeholder="<p>Hey there!</p>" />
             </div>
             <div className="flex justify-end">
               <button type="submit" disabled={isPending} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">

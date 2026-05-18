@@ -1,0 +1,30 @@
+name = "growthos-publisher"
+main = "src/workers/publisher.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Database ───
+[[d1_databases]]
+binding = "DB"
+database_name = "growthos-prod"
+database_id = "2b46db77-e682-45de-8205-b223246b7334"
+
+# ─── Publish Queue (producer + consumer) ───
+[[queues.producers]]
+binding = "PUBLISH_QUEUE"
+queue = "growthos-publish"
+
+[[queues.consumers]]
+queue = "growthos-publish"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "growthos-publish-dlq"
+
+# ─── Cron: scan for due posts every minute ───
+[triggers]
+crons = ["* * * * *"]
+
+# ─── Secrets (set once via CLI) ───
+# wrangler secret put ENCRYPTION_KEY --config wrangler.publisher.toml
+# Use the SAME value as the Pages project ENCRYPTION_KEY

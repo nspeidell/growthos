@@ -129,7 +129,7 @@ export async function schedulePost(
       connectedAccountId: formData.get("connectedAccountId"),
       scheduledFor: formData.get("scheduledFor"),
       approvalMode: formData.get("approvalMode") ?? "manual",
-      metadata: formData.get("metadata"),
+      metadata: formData.get("metadata") ?? undefined,
     });
 
     // Verify content asset exists and is approved

@@ -1,4 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// ContentAgent calls generateWithClaude at runtime; mock it so tests
+// don't require a live API key and always return a stable string.
+vi.mock("@/lib/ai/claude", () => ({
+  generateWithClaude: vi.fn(() =>
+    Promise.resolve("This is mock generated content for testing purposes.")
+  ),
+}));
+
 import { createAgent, getAllAgents } from "./index";
 import { StrategistAgent } from "./strategist";
 import { ContentAgent } from "./content";

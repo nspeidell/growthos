@@ -56,7 +56,23 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Cancel any queued/draft posts for this account
+  // Mark the account as disconnected and clear tokens, but preserve the row.
+  // This keeps the row ID intact so any scheduled_posts that reference this
+  // account are NOT orphaned. When the user reconnects, the OAuth callback
+  // upsert will find this row by (platform + workspaceId + platformAccountId)
+  // and update it in-place — same ID, new tokens, status back to 'active'.
+  await db
+    .update(connectedAccounts)
+    .set({
+      accountStatus: "revoked",
+      accessTokenEncrypted: "",
+      refreshTokenEncrypted: null,
+      tokenExpiresAt: null,
+    })
+    .where(eq(connectedAccounts.id, accountId));
+
+  // Cancel only the queued/draft posts so the user doesn't have stale items
+  // re-firing on reconnect. Published/failed posts are left untouched for history.
   await db
     .update(scheduledPosts)
     .set({ postStatus: "cancelled", updatedAt: new Date() })
@@ -76,11 +92,6 @@ export async function POST(request: NextRequest) {
         eq(scheduledPosts.postStatus, "draft")
       )
     );
-
-  // Delete the connected account
-  await db
-    .delete(connectedAccounts)
-    .where(eq(connectedAccounts.id, accountId));
 
   return NextResponse.json({ success: true });
 }

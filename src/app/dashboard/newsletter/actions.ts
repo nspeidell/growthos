@@ -9,6 +9,7 @@ import { createDb } from "@/lib/db/client";
 import { subscribers, newsletters } from "@/lib/db/schema";
 import { safeAction, type ActionResult } from "@/lib/utils/api";
 import { ResendClient, generateNewsletterHtml } from "@/lib/email/resend-client";
+import { generateWithClaude } from "@/lib/ai/claude";
 import type { Subscriber, Newsletter } from "@/lib/db/schema";
 
 // ─── Validation ───
@@ -293,9 +294,10 @@ export async function sendNewsletter(
     const resend = new ResendClient(env.RESEND_API_KEY);
     const fromAddress = newsletter.fromEmail
       ? `${newsletter.fromName ?? "Newsletter"} <${newsletter.fromEmail}>`
-      : `GrowthOS <noreply@${env.APP_URL?.replace(/https?:\/\//, "") ?? "growthos.app"}>`;
+      : `${newsletter.fromName ?? "Reunion"} <hello@reunionchallenge.com>`;
 
     let sentCount = 0;
+    let lastError: string | null = null;
     const batchSize = 50;
 
     for (let i = 0; i < targetSubs.length; i += batchSize) {
@@ -313,8 +315,22 @@ export async function sendNewsletter(
         await resend.sendBatch(emails);
         sentCount += batch.length;
       } catch (error) {
-        console.error(`Batch send failed:`, error);
+        lastError = error instanceof Error ? error.message : "Unknown Resend error";
+        console.error(`Batch send failed:`, lastError);
       }
+    }
+
+    // If nothing sent at all, surface the error and revert to draft
+    if (sentCount === 0) {
+      await db
+        .update(newsletters)
+        .set({ newsletterStatus: "draft" })
+        .where(eq(newsletters.id, newsletterId));
+      throw new Error(
+        lastError
+          ? `Resend API error: ${lastError}`
+          : "No emails were sent — check your Resend API key and domain verification"
+      );
     }
 
     // Update newsletter
@@ -360,5 +376,39 @@ export async function deleteNewsletter(
 
     await db.delete(newsletters).where(eq(newsletters.id, newsletterId));
     return { deleted: true };
+  });
+}
+
+// ─── AI Generate Newsletter ───
+
+export interface GeneratedNewsletter {
+  subject: string;
+  previewText: string;
+  body: string;
+}
+
+export async function generateNewsletterWithAI(
+  topic: string
+): Promise<ActionResult<GeneratedNewsletter>> {
+  return safeAction(async () => {
+    await requirePermission("content:write");
+
+    const raw = await generateWithClaude({
+      systemPrompt: `You are an expert email marketer. Generate a newsletter in JSON format.
+Return ONLY valid JSON with this exact structure, no markdown, no code blocks:
+{
+  "subject": "compelling subject line under 60 characters",
+  "previewText": "preview text under 100 characters",
+  "body": "full HTML newsletter body using <p>, <h2>, <ul>, <li>, <strong> tags. 3-5 paragraphs, conversational tone."
+}`,
+      userMessage: `Write a newsletter about: ${topic}`,
+      maxTokens: 1500,
+    });
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("AI did not return valid JSON");
+    const parsed = JSON.parse(jsonMatch[0]) as GeneratedNewsletter;
+    if (!parsed.subject || !parsed.body) throw new Error("AI response missing required fields");
+    return parsed;
   });
 }

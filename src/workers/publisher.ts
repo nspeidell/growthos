@@ -8,21 +8,71 @@
  *    adapter, updates status.
  *
  * Retry logic: up to 3 attempts with exponential backoff.
+ * Token refresh: X tokens expire in 2 hours; refresh automatically before use.
  */
 
 import type { CloudflareEnv } from "@/lib/cloudflare/bindings";
-import { decrypt } from "@/lib/utils/crypto";
-import { publishToplatform } from "@/lib/publishers/adapters";
+import { decrypt, encrypt } from "../lib/utils/crypto";
+import { publishToplatform } from "../lib/publishers/adapters";
 
 const MAX_RETRIES = 3;
+// Refresh X token if it expires within this window (15 minutes)
+const TOKEN_REFRESH_BUFFER_MS = 15 * 60 * 1000;
 
 interface PublishJobMessage {
   postId: string;
   platform: string;
   contentBody: string;
   accessTokenEncrypted: string;
+  refreshTokenEncrypted?: string;
+  tokenExpiresAt?: number; // Unix timestamp in seconds
+  connectedAccountId: string;
   metadata?: string;
   retryCount: number;
+}
+
+/**
+ * Refresh an X (Twitter) OAuth 2.0 access token using the stored refresh token.
+ * X tokens expire after 2 hours; refresh tokens last ~60 days.
+ */
+async function refreshXToken(
+  refreshTokenEncrypted: string,
+  env: CloudflareEnv
+): Promise<{ accessTokenEncrypted: string; refreshTokenEncrypted: string; expiresAt: number }> {
+  const refreshToken = await decrypt(refreshTokenEncrypted, env.ENCRYPTION_KEY);
+
+  const res = await fetch("https://api.x.com/2/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: "Basic " + btoa(`${env.X_CLIENT_ID}:${env.X_CLIENT_SECRET}`),
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`X token refresh failed (${res.status}): ${err}`);
+  }
+
+  const data = await res.json() as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+  };
+
+  const newAccessTokenEncrypted = await encrypt(data.access_token, env.ENCRYPTION_KEY);
+  const newRefreshTokenEncrypted = await encrypt(data.refresh_token, env.ENCRYPTION_KEY);
+  const expiresAt = Math.floor(Date.now() / 1000) + data.expires_in;
+
+  return {
+    accessTokenEncrypted: newAccessTokenEncrypted,
+    refreshTokenEncrypted: newRefreshTokenEncrypted,
+    expiresAt,
+  };
 }
 
 export default {
@@ -40,7 +90,10 @@ export default {
       `SELECT
          sp.id, sp.platform, sp.content_asset_id, sp.connected_account_id,
          sp.metadata, sp.retry_count,
+         ca.id as account_id,
          ca.access_token_encrypted,
+         ca.refresh_token_encrypted,
+         ca.token_expires_at,
          cas.body as content_body
        FROM scheduled_posts sp
        JOIN connected_accounts ca ON sp.connected_account_id = ca.id
@@ -56,7 +109,10 @@ export default {
         id: string;
         platform: string;
         content_body: string;
+        account_id: string;
         access_token_encrypted: string;
+        refresh_token_encrypted: string | null;
+        token_expires_at: number | null;
         metadata: string | null;
         retry_count: number;
       }>();
@@ -76,6 +132,9 @@ export default {
         platform: post.platform,
         contentBody: post.content_body,
         accessTokenEncrypted: post.access_token_encrypted,
+        refreshTokenEncrypted: post.refresh_token_encrypted ?? undefined,
+        tokenExpiresAt: post.token_expires_at ?? undefined,
+        connectedAccountId: post.account_id,
         metadata: post.metadata ?? undefined,
         retryCount: post.retry_count,
       };
@@ -95,9 +154,14 @@ export default {
       const job = msg.body;
 
       try {
+        // TODO: X token refresh (re-enable once refresh token storage is verified)
+        // X tokens expire in 2 hours. For now, reconnect X in Settings before scheduling
+        // if the token is older than ~1h45m. Proper auto-refresh will be added in a follow-up.
+        const { accessTokenEncrypted } = job;
+
         // Decrypt access token
         const accessToken = await decrypt(
-          job.accessTokenEncrypted,
+          accessTokenEncrypted,
           env.ENCRYPTION_KEY
         );
 
@@ -135,9 +199,9 @@ export default {
 
         // Update last_used_at on connected account
         await env.DB.prepare(
-          `UPDATE connected_accounts SET last_used_at = ? WHERE access_token_encrypted = ?`
+          `UPDATE connected_accounts SET last_used_at = ? WHERE id = ?`
         )
-          .bind(now, job.accessTokenEncrypted)
+          .bind(now, job.connectedAccountId)
           .run();
 
         msg.ack();

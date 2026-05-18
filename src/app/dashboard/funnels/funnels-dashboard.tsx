@@ -9,11 +9,13 @@ import {
   ExternalLink,
   Loader2,
   Link2,
+  Sparkles,
 } from "lucide-react";
 import {
   listLeadMagnets,
   createLeadMagnet,
   deleteLeadMagnet,
+  generateLeadMagnetWithAI,
 } from "./actions";
 import type { LeadMagnet } from "@/lib/db/schema";
 
@@ -23,6 +25,9 @@ export default function FunnelsDashboard() {
   const [isPending, startTransition] = useTransition();
   const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiTopic, setAiTopic] = useState("");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiFields, setAiFields] = useState<{ title: string; description: string; slug: string } | null>(null);
 
   useEffect(() => {
     load();
@@ -41,11 +46,26 @@ export default function FunnelsDashboard() {
       const result = await createLeadMagnet(formData);
       if (result.success) {
         setShowCreate(false);
+        setAiFields(null);
+        setAiTopic("");
         await load();
       } else {
         setError(result.error ?? "Failed to create lead magnet");
       }
     });
+  }
+
+  async function handleAIGenerate() {
+    if (!aiTopic.trim()) return;
+    setAiGenerating(true);
+    setError(null);
+    const result = await generateLeadMagnetWithAI(aiTopic.trim());
+    setAiGenerating(false);
+    if (result.success && result.data) {
+      setAiFields(result.data);
+    } else if (!result.success) {
+      setError(result.error ?? "AI generation failed");
+    }
   }
 
   function handleDelete(id: string) {
@@ -108,13 +128,40 @@ export default function FunnelsDashboard() {
       {showCreate && (
         <div className="rounded-xl border border-border bg-card p-6">
           <h3 className="text-lg font-semibold text-foreground mb-4">Create Lead Magnet</h3>
+
+          {/* AI Generate */}
+          <div className="mb-5 rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <p className="text-xs font-medium text-primary mb-2">✦ AI Generate</p>
+            <div className="flex gap-2">
+              <input
+                value={aiTopic}
+                onChange={(e) => setAiTopic(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAIGenerate()}
+                className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
+                placeholder="e.g. a checklist for planning a family reunion"
+              />
+              <button
+                type="button"
+                onClick={handleAIGenerate}
+                disabled={aiGenerating || !aiTopic.trim()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {aiGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {aiGenerating ? "Generating…" : "Generate"}
+              </button>
+            </div>
+            {aiFields && <p className="mt-2 text-xs text-primary">✓ Fields filled below — add your file URL and save</p>}
+          </div>
+
           <form action={handleCreate} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Title</label>
                 <input
+                  key={aiFields?.title}
                   name="title"
                   required
+                  defaultValue={aiFields?.title ?? ""}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
                   placeholder="Ultimate Growth Playbook"
                 />
@@ -122,9 +169,11 @@ export default function FunnelsDashboard() {
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">Slug</label>
                 <input
+                  key={aiFields?.slug}
                   name="slug"
                   required
                   pattern="[a-z0-9-]+"
+                  defaultValue={aiFields?.slug ?? ""}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
                   placeholder="growth-playbook"
                 />
@@ -133,8 +182,10 @@ export default function FunnelsDashboard() {
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-foreground mb-1">Description</label>
                 <textarea
+                  key={aiFields?.description}
                   name="description"
                   rows={2}
+                  defaultValue={aiFields?.description ?? ""}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
                   placeholder="A 30-page guide covering audience growth strategies..."
                 />

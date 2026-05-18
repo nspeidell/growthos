@@ -8,6 +8,7 @@ import { getBindings } from "@/lib/cloudflare/bindings";
 import { createDb } from "@/lib/db/client";
 import { leadMagnets } from "@/lib/db/schema";
 import { safeAction, type ActionResult } from "@/lib/utils/api";
+import { generateWithClaude } from "@/lib/ai/claude";
 import type { LeadMagnet } from "@/lib/db/schema";
 
 // ─── Validation ───
@@ -164,5 +165,41 @@ export async function deleteLeadMagnet(
 
     await db.delete(leadMagnets).where(eq(leadMagnets.id, id));
     return { deleted: true };
+  });
+}
+
+// ─── AI Generate Lead Magnet ───
+
+export interface GeneratedLeadMagnet {
+  title: string;
+  description: string;
+  slug: string;
+}
+
+export async function generateLeadMagnetWithAI(
+  topic: string
+): Promise<ActionResult<GeneratedLeadMagnet>> {
+  return safeAction(async () => {
+    await requirePermission("content:write");
+
+    const raw = await generateWithClaude({
+      systemPrompt: `You are an expert growth marketer. Generate lead magnet metadata in JSON format.
+Return ONLY valid JSON with this exact structure, no markdown, no code blocks:
+{
+  "title": "compelling lead magnet title, 5-10 words",
+  "description": "1-2 sentence description of what they get and why it's valuable, under 200 characters",
+  "slug": "url-safe-slug-with-hyphens-lowercase-no-spaces"
+}`,
+      userMessage: `Create a lead magnet for: ${topic}`,
+      maxTokens: 300,
+    });
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("AI did not return valid JSON");
+    const parsed = JSON.parse(jsonMatch[0]) as GeneratedLeadMagnet;
+    if (!parsed.title || !parsed.slug) throw new Error("AI response missing required fields");
+    // Sanitize slug just in case
+    parsed.slug = parsed.slug.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    return parsed;
   });
 }

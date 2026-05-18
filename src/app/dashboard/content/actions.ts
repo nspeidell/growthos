@@ -700,6 +700,12 @@ export interface ContentAssetWithProject {
     r2Key: string | null;
     error: string | null;
   } | null;
+  publishedPost?: {
+    postStatus: string;
+    platformPostUrl: string | null;
+    publishedAt: number | null;
+    errorMessage: string | null;
+  } | null;
 }
 
 export async function listContentAssets(filters?: {
@@ -779,6 +785,37 @@ export async function listContentAssets(filters?: {
       }
     }
 
+    // Fetch the most recent scheduled_post for each content asset
+    const publishedPostMap = new Map<string, {
+      postStatus: string;
+      platformPostUrl: string | null;
+      publishedAt: number | null;
+      errorMessage: string | null;
+    }>();
+
+    for (const asset of allAssets) {
+      const sp = await db
+        .select({
+          postStatus: scheduledPosts.postStatus,
+          platformPostUrl: scheduledPosts.platformPostUrl,
+          publishedAt: scheduledPosts.publishedAt,
+          errorMessage: scheduledPosts.errorMessage,
+        })
+        .from(scheduledPosts)
+        .where(eq(scheduledPosts.contentAssetId, asset.id))
+        .orderBy(desc(scheduledPosts.createdAt))
+        .get();
+
+      if (sp) {
+        publishedPostMap.set(asset.id, {
+          postStatus: sp.postStatus,
+          platformPostUrl: sp.platformPostUrl ?? null,
+          publishedAt: sp.publishedAt instanceof Date ? sp.publishedAt.getTime() : (sp.publishedAt ?? null),
+          errorMessage: sp.errorMessage ?? null,
+        });
+      }
+    }
+
     return allAssets.map((a) => ({
       id: a.id,
       projectId: a.projectId,
@@ -790,6 +827,7 @@ export async function listContentAssets(filters?: {
       status: a.status,
       createdAt: a.createdAt instanceof Date ? a.createdAt.toISOString() : String(a.createdAt),
       mediaJob: mediaJobMap.get(a.id) ?? null,
+      publishedPost: publishedPostMap.get(a.id) ?? null,
     }));
   });
 }

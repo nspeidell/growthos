@@ -28,6 +28,18 @@ const mockDb: any = {
 
 vi.mock("@/lib/auth/middleware", () => ({
   requirePermission: vi.fn(() => Promise.resolve(mockSession)),
+  AuthError: class AuthError extends Error {
+    constructor(message = "Authentication required") {
+      super(message);
+      this.name = "AuthError";
+    }
+  },
+  PermissionError: class PermissionError extends Error {
+    constructor(message = "Insufficient permissions") {
+      super(message);
+      this.name = "PermissionError";
+    }
+  },
 }));
 
 vi.mock("@/lib/cloudflare/bindings", () => ({

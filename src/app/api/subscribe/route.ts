@@ -17,6 +17,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { getBindings } from "@/lib/cloudflare/bindings";
 import { createDb } from "@/lib/db/client";
 import { subscribers, workspaces, leadMagnets } from "@/lib/db/schema";
+import { enrollSubscriber } from "@/lib/automations/enroll";
 
 export const runtime = "edge";
 
@@ -75,17 +76,34 @@ export async function POST(request: NextRequest) {
     if (existing.subscriberStatus === "unsubscribed") {
       await db
         .update(subscribers)
-        .set({
-          subscriberStatus: "active",
-          unsubscribedAt: null,
-        })
+        .set({ subscriberStatus: "active", unsubscribedAt: null })
         .where(eq(subscribers.id, existing.id));
     }
-    return NextResponse.json({ success: true, resubscribed: true });
+    // Still return the download URL so returning visitors can get the file
+    let existingDownloadUrl: string | null = null;
+    if (input.source === "lead_magnet" && input.leadMagnetSlug) {
+      const lm = await db
+        .select()
+        .from(leadMagnets)
+        .where(
+          and(
+            eq(leadMagnets.workspaceId, workspace.id),
+            eq(leadMagnets.slug, input.leadMagnetSlug)
+          )
+        )
+        .get();
+      if (lm) existingDownloadUrl = lm.fileUrl;
+    }
+    return NextResponse.json({
+      success: true,
+      resubscribed: true,
+      ...(existingDownloadUrl ? { downloadUrl: existingDownloadUrl } : {}),
+    });
   }
 
   // Validate lead magnet if source is lead_magnet
   let resolvedLeadMagnetSlug: string | null = null;
+  let downloadUrl: string | null = null;
   if (input.source === "lead_magnet" && input.leadMagnetSlug) {
     const lm = await db
       .select()
@@ -100,6 +118,7 @@ export async function POST(request: NextRequest) {
 
     if (lm) {
       resolvedLeadMagnetSlug = lm.slug;
+      downloadUrl = lm.fileUrl;
       // Increment download count
       await db
         .update(leadMagnets)
@@ -115,8 +134,9 @@ export async function POST(request: NextRequest) {
     ...(resolvedLeadMagnetSlug ? [`lm:${resolvedLeadMagnetSlug}`] : []),
   ];
 
+  const newId = createId();
   await db.insert(subscribers).values({
-    id: createId(),
+    id: newId,
     workspaceId: workspace.id,
     email: input.email,
     name: input.name ?? null,
@@ -132,5 +152,18 @@ export async function POST(request: NextRequest) {
   const current = await env.KV.get(countKey);
   await env.KV.put(countKey, String((current ? parseInt(current) : 0) + 1));
 
-  return NextResponse.json({ success: true });
+  // Enroll in any matching automations (fire-and-forget, never blocks response)
+  const triggerType = input.source === "lead_magnet" ? "lead_magnet" : "subscribe";
+  enrollSubscriber({
+    subscriberId: newId,
+    workspaceId: workspace.id,
+    triggerType,
+    triggerValue: input.leadMagnetSlug,
+    db,
+  }).catch(() => { /* non-critical */ });
+
+  return NextResponse.json({
+    success: true,
+    ...(downloadUrl ? { downloadUrl } : {}),
+  });
 }

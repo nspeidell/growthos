@@ -12,6 +12,7 @@ interface LeadMagnetInfo {
   fileUrl: string;
   fileType: string | null;
   coverUrl: string | null;
+  workspaceSlug: string;
 }
 
 export default function LeadMagnetPage() {
@@ -56,7 +57,7 @@ export default function LeadMagnetPage() {
         body: JSON.stringify({
           email,
           name: name || undefined,
-          workspaceSlug: getWorkspaceSlug(),
+          workspaceSlug: magnet?.workspaceSlug ?? "default",
           source: "lead_magnet",
           leadMagnetSlug: slug,
         }),

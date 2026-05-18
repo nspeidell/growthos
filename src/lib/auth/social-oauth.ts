@@ -29,6 +29,10 @@ export const PLATFORM_OAUTH_CONFIGS: Record<string, PlatformOAuthConfig> = {
     scopes: [
       "public_profile",
       "pages_show_list",
+      "pages_manage_posts",
+      "pages_read_engagement",
+      "instagram_basic",
+      "instagram_content_publish",
     ],
     clientIdEnvKey: "META_APP_ID",
     clientSecretEnvKey: "META_APP_SECRET",
@@ -40,6 +44,8 @@ export const PLATFORM_OAUTH_CONFIGS: Record<string, PlatformOAuthConfig> = {
     scopes: [
       "public_profile",
       "pages_show_list",
+      "pages_manage_posts",
+      "pages_read_engagement",
     ],
     clientIdEnvKey: "META_APP_ID",
     clientSecretEnvKey: "META_APP_SECRET",
@@ -262,8 +268,9 @@ export async function exchangeCodeForTokens(
     "Content-Type": "application/x-www-form-urlencoded",
   };
 
-  // X, Reddit, and Pinterest require Basic auth header
-  if (config.platform === "reddit" || config.platform === "x" || config.platform === "pinterest") {
+  // X (Twitter) and Reddit and Pinterest use Basic auth (confidential clients)
+  // X OAuth 2.0 is a confidential client — credentials go in the Authorization header
+  if (config.platform === "x" || config.platform === "reddit" || config.platform === "pinterest") {
     headers["Authorization"] =
       "Basic " + btoa(`${clientId}:${clientSecret}`);
     body.delete("client_id");
@@ -277,9 +284,17 @@ export async function exchangeCodeForTokens(
   });
 
   if (!response.ok) {
-    const error = await response.text();
+    const errorText = await response.text();
+    const diag = [
+      `redirect_uri=${redirectUri}`,
+      `code_verifier_present=${!!codeVerifier}`,
+      `body_keys=${[...body.keys()].join(",")}`,
+      `auth_header_present=${!!headers["Authorization"]}`,
+      `client_id_length=${clientId.length}`,
+      `client_secret_length=${clientSecret.length}`,
+    ].join(" | ");
     throw new Error(
-      `Token exchange failed for ${config.platform}: ${response.status} ${error}`
+      `Token exchange failed for ${config.platform}: ${response.status} ${errorText} | DIAG: ${diag}`
     );
   }
 

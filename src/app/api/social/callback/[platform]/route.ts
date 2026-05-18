@@ -19,6 +19,7 @@ import {
   encryptToken,
   fetchPlatformProfile,
 } from "@/lib/auth/social-oauth";
+import { kvSet } from "@/lib/cloudflare/kv";
 
 export const runtime = "edge";
 
@@ -175,6 +176,11 @@ export async function GET(
     const errorMessage =
       err instanceof Error ? err.message : "Connection failed";
     console.error(`Social OAuth error (${platform}):`, errorMessage);
+
+    // TEMP DEBUG: store last error in KV so it can be read via /api/debug-oauth
+    try {
+      await kvSet("oauth_last_error", { platform, error: errorMessage, ts: Date.now() }, 3600);
+    } catch { /* ignore KV write failure */ }
 
     return NextResponse.redirect(
       new URL(

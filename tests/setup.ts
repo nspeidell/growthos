@@ -3,6 +3,9 @@
 
 import { vi } from "vitest";
 
+// Mock server-only (used by @cloudflare/next-on-pages)
+vi.mock("server-only", () => ({}));
+
 // Mock next/headers
 vi.mock("next/headers", () => ({
   cookies: vi.fn(() => ({

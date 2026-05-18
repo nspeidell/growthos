@@ -21,35 +21,50 @@ export async function GET(
   const env = getBindings();
   const db = createDb(env.DB);
 
-  // Determine workspace from query param or default
-  const workspaceSlug =
-    request.nextUrl.searchParams.get("workspace") ?? "default";
+  // Global slug lookup — find the lead magnet across all workspaces.
+  // This avoids requiring a workspace param on public-facing URLs.
+  const workspaceSlugParam = request.nextUrl.searchParams.get("workspace");
 
-  const workspace = await db
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.slug, workspaceSlug))
-    .get();
+  let magnet = null;
+  let workspace = null;
 
-  if (!workspace) {
-    return NextResponse.json(
-      { error: "Workspace not found" },
-      { status: 404 }
-    );
+  if (workspaceSlugParam) {
+    workspace = await db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.slug, workspaceSlugParam))
+      .get();
+
+    if (workspace) {
+      magnet = await db
+        .select()
+        .from(leadMagnets)
+        .where(
+          and(
+            eq(leadMagnets.workspaceId, workspace.id),
+            eq(leadMagnets.slug, slug)
+          )
+        )
+        .get();
+    }
+  } else {
+    // No workspace param — find by slug globally, then look up its workspace
+    magnet = await db
+      .select()
+      .from(leadMagnets)
+      .where(eq(leadMagnets.slug, slug))
+      .get();
+
+    if (magnet) {
+      workspace = await db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.id, magnet.workspaceId))
+        .get();
+    }
   }
 
-  const magnet = await db
-    .select()
-    .from(leadMagnets)
-    .where(
-      and(
-        eq(leadMagnets.workspaceId, workspace.id),
-        eq(leadMagnets.slug, slug)
-      )
-    )
-    .get();
-
-  if (!magnet) {
+  if (!magnet || !workspace) {
     return NextResponse.json(
       { error: "Lead magnet not found" },
       { status: 404 }
@@ -62,5 +77,6 @@ export async function GET(
     fileUrl: magnet.fileUrl,
     fileType: magnet.fileType,
     coverUrl: magnet.coverUrl,
+    workspaceSlug: workspace.slug, // returned so the page can subscribe to the right workspace
   });
 }

@@ -45,14 +45,17 @@ describe("launchMission", () => {
   it("passes workspace ID and JSON objective to D1", async () => {
     await launchMission("ws_abc", "Test goal", "conversion_rate", ["budget < 1k"]);
 
+    // Actual bind signature: (missionId, workspaceId, title, objectiveJson, userId)
     expect(mockBind).toHaveBeenCalledWith(
       expect.stringMatching(/^mission_/),
       "ws_abc",
-      expect.stringContaining("Test goal")
+      "Test goal",
+      expect.stringContaining("Test goal"),
+      "system"
     );
-    // Verify JSON includes optional fields
+    // Verify JSON includes optional fields (index 3 = objectiveJson)
     const boundArgs = mockBind.mock.calls[0] as unknown[];
-    const objective = JSON.parse(boundArgs[2] as string) as Record<string, unknown>;
+    const objective = JSON.parse(boundArgs[3] as string) as Record<string, unknown>;
     expect(objective["goal"]).toBe("Test goal");
     expect(objective["targetMetric"]).toBe("conversion_rate");
     expect(objective["constraints"]).toEqual(["budget < 1k"]);

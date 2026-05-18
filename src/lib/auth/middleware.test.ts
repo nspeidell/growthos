@@ -72,21 +72,25 @@ describe("hasPermission", () => {
 describe("getPermissions", () => {
   it("returns all owner permissions", () => {
     const perms = getPermissions("owner");
-    expect(perms).toHaveLength(15);
+    expect(perms).toHaveLength(21);
     expect(perms).toContain("billing:write");
     expect(perms).toContain("settings:write");
+    expect(perms).toContain("experiments:admin");
+    expect(perms).toContain("signals:admin");
   });
 
   it("returns empty array for unknown role", () => {
     expect(getPermissions("ghost")).toEqual([]);
   });
 
-  it("viewer has exactly 3 permissions", () => {
+  it("viewer has exactly 5 permissions", () => {
     const perms = getPermissions("viewer");
-    expect(perms).toHaveLength(3);
+    expect(perms).toHaveLength(5);
     expect(perms).toContain("content:read");
     expect(perms).toContain("analytics:read");
     expect(perms).toContain("swarm:read");
+    expect(perms).toContain("experiments:read");
+    expect(perms).toContain("signals:read");
   });
 });
 
