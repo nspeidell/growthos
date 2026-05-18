@@ -602,7 +602,7 @@ function AccountsTab({
 
               {connected ? (
                 <div className="flex items-center gap-2">
-                  {connected.accountStatus === "expired" && (
+                  {(connected.accountStatus === "expired" || connected.accountStatus === "revoked") && (
                     <a
                       href={`/api/social/connect?platform=${key}`}
                       className="px-3 py-1.5 text-xs font-medium bg-amber-500/10 text-amber-400 rounded-md hover:bg-amber-500/20"
