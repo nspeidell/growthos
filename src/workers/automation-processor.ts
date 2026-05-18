@@ -2,7 +2,7 @@
  * Cloudflare Worker: Automation Processor
  *
  * Cron trigger (every minute): reads active automation_enrollments whose
- * next_step_at is due (NULL = run immediately, or <= now), executes the
+ * next_step_at is due (<= now; 0 means run immediately), executes the
  * current step, then advances to the next one.
  *
  * Supported step types:
@@ -126,7 +126,7 @@ export default {
        INNER JOIN subscribers s  ON ae.subscriber_id  = s.id
        WHERE ae.enrollment_status = 'active'
          AND a.automation_status  = 'active'
-         AND (ae.next_step_at IS NULL OR ae.next_step_at <= ?)
+         AND ae.next_step_at <= ?
        LIMIT ?`
     )
       .bind(now, BATCH_SIZE)
@@ -180,7 +180,7 @@ export default {
             await env.DB.prepare(
               `UPDATE automation_enrollments
                SET current_step = ?,
-                   next_step_at = NULL
+                   next_step_at = 0
                WHERE id = ?`
             )
               .bind(nextStepIndex, row.id)
@@ -235,7 +235,7 @@ export default {
             await env.DB.prepare(
               `UPDATE automation_enrollments
                SET current_step = ?,
-                   next_step_at = NULL
+                   next_step_at = 0
                WHERE id = ?`
             )
               .bind(nextStepIndex, row.id)

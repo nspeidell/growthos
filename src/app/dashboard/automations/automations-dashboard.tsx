@@ -321,7 +321,11 @@ export default function AutomationsDashboard() {
 
   function handleToggle(id: string) {
     startTransition(async () => {
-      await toggleAutomation(id);
+      const result = await toggleAutomation(id);
+      if (!result.success) {
+        setError(result.error ?? "Failed to update automation status");
+        return;
+      }
       await load();
     });
   }

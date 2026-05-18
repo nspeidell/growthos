@@ -51,7 +51,7 @@ export async function enrollSubscriber(opts: {
         workspaceId,
         currentStep: 0,
         enrollmentStatus: "active",
-        nextStepAt: null, // run immediately on next cron tick
+        nextStepAt: 0, // 0 = run on next cron tick (0 <= now is always true, and index covers it)
         enrolledAt: now,
       });
 

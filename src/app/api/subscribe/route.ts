@@ -152,15 +152,17 @@ export async function POST(request: NextRequest) {
   const current = await env.KV.get(countKey);
   await env.KV.put(countKey, String((current ? parseInt(current) : 0) + 1));
 
-  // Enroll in any matching automations (fire-and-forget, never blocks response)
+  // Enroll in any matching automations — must be awaited so Cloudflare's edge
+  // runtime doesn't terminate the execution context before the insert completes.
+  // (Fire-and-forget promises are not guaranteed to finish after Response is sent.)
   const triggerType = input.source === "lead_magnet" ? "lead_magnet" : "subscribe";
-  enrollSubscriber({
+  await enrollSubscriber({
     subscriberId: newId,
     workspaceId: workspace.id,
     triggerType,
     triggerValue: input.leadMagnetSlug,
     db,
-  }).catch(() => { /* non-critical */ });
+  }).catch(() => { /* enrollment failure is non-critical; subscriber is already saved */ });
 
   return NextResponse.json({
     success: true,
