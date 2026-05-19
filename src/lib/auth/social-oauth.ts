@@ -246,6 +246,7 @@ export interface TokenResponse {
   refreshToken?: string;
   expiresIn?: number;
   scope?: string;
+  userId?: string; // Instagram Business Login returns user_id in exchange response
 }
 
 export async function exchangeCodeForTokens(
@@ -309,6 +310,7 @@ export async function exchangeCodeForTokens(
     refreshToken: data.refresh_token as string | undefined,
     expiresIn: data.expires_in as number | undefined,
     scope: data.scope as string | undefined,
+    userId: data.user_id != null ? String(data.user_id) : undefined,
   };
 }
 
@@ -360,6 +362,34 @@ export async function refreshAccessToken(
   };
 }
 
+// ─── Instagram Long-Lived Token Exchange ────────────────────────────────────
+// Short-lived tokens from api.instagram.com/oauth/access_token cannot be used
+// directly with graph.instagram.com. Must be upgraded to a long-lived token first.
+
+export async function upgradeInstagramToken(
+  shortLivedToken: string,
+  clientSecret: string
+): Promise<{ accessToken: string; expiresIn: number }> {
+  const url = new URL("https://graph.instagram.com/access_token");
+  url.searchParams.set("grant_type", "ig_exchange_token");
+  url.searchParams.set("client_secret", clientSecret);
+  url.searchParams.set("access_token", shortLivedToken);
+
+  const res = await fetch(url.toString());
+  const raw = await res.text();
+  let data: { access_token?: string; token_type?: string; expires_in?: number };
+  try { data = JSON.parse(raw) as typeof data; } catch { data = {}; }
+
+  if (!data.access_token) {
+    throw new Error(`Instagram token upgrade failed: ${raw.slice(0, 300)}`);
+  }
+
+  return {
+    accessToken: data.access_token,
+    expiresIn: data.expires_in ?? 5183944, // default ~60 days
+  };
+}
+
 // ─── Token Encryption Helpers ───
 
 export async function encryptToken(
@@ -386,11 +416,12 @@ export interface PlatformProfile {
 
 export async function fetchPlatformProfile(
   platform: string,
-  accessToken: string
+  accessToken: string,
+  userId?: string
 ): Promise<PlatformProfile> {
   switch (platform) {
     case "instagram":
-      return fetchInstagramProfile(accessToken);
+      return fetchInstagramProfile(accessToken, userId);
     case "facebook":
       return fetchFacebookProfile(accessToken);
     case "youtube":
@@ -423,25 +454,65 @@ export async function fetchPlatformProfile(
 }
 
 async function fetchInstagramProfile(
-  accessToken: string
+  accessToken: string,
+  userId?: string
 ): Promise<PlatformProfile> {
-  // Instagram Business Login (2024+): token is scoped to the IG account directly
-  const profileRes = await fetch(
-    `https://graph.instagram.com/v21.0/me?fields=id,username,profile_picture_url&access_token=${accessToken}`
+  // Instagram Business Login (2024+) — if token exchange returned user_id, use it
+  // directly. Otherwise fall back to /me. Both use the same graph.instagram.com host.
+  const igEndpoint = userId
+    ? `https://graph.instagram.com/v21.0/${userId}?fields=id,username,profile_picture_url&access_token=${accessToken}`
+    : `https://graph.instagram.com/v21.0/me?fields=id,username,profile_picture_url&access_token=${accessToken}`;
+  const igRes = await fetch(igEndpoint, {
+    headers: {
+      "User-Agent": "GrowthOS/1.0",
+      "Accept": "application/json",
+    },
+  });
+  const igRaw = await igRes.text();
+  let igProfile: { id?: string; username?: string; profile_picture_url?: string; error?: unknown };
+  try { igProfile = JSON.parse(igRaw) as typeof igProfile; } catch { igProfile = {}; }
+
+  if (igProfile.id) {
+    return {
+      platformAccountId: igProfile.id,
+      username: igProfile.username ?? "instagram_user",
+      avatarUrl: igProfile.profile_picture_url,
+    };
+  }
+
+  // Fallback: token may be a Facebook user token — get linked IG Business Account
+  const fbRes = await fetch(
+    `https://graph.facebook.com/v21.0/me?fields=id,name,instagram_business_account{id,username,profile_picture_url}&access_token=${accessToken}`
   );
-  const profile = await profileRes.json() as {
+  const fbRaw = await fbRes.text();
+  let fbData: {
     id?: string;
-    username?: string;
-    profile_picture_url?: string;
+    name?: string;
+    instagram_business_account?: { id?: string; username?: string; profile_picture_url?: string };
   };
+  try { fbData = JSON.parse(fbRaw) as typeof fbData; } catch { fbData = {}; }
 
-  if (!profile.id) throw new Error("Failed to fetch Instagram profile");
+  const igAccount = fbData.instagram_business_account;
+  if (igAccount?.id) {
+    return {
+      platformAccountId: igAccount.id,
+      username: igAccount.username ?? fbData.name ?? "instagram_user",
+      avatarUrl: igAccount.profile_picture_url,
+    };
+  }
 
-  return {
-    platformAccountId: profile.id,
-    username: profile.username ?? "instagram_user",
-    avatarUrl: profile.profile_picture_url,
-  };
+  // Last resort: use userId from token exchange response (always present for Instagram Business Login)
+  if (userId) {
+    return {
+      platformAccountId: userId,
+      username: "instagram_user",
+      avatarUrl: undefined,
+    };
+  }
+
+  throw new Error(
+    `Instagram profile missing id. IG=${igRaw.slice(0, 300)} FB=${fbRaw.slice(0, 300)}`
+  );
 }
 
 async function fetchFacebookProfile(

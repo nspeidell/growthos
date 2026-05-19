@@ -16,6 +16,7 @@ import {
   getOAuthState,
   deleteOAuthState,
   exchangeCodeForTokens,
+  upgradeInstagramToken,
   encryptToken,
   fetchPlatformProfile,
 } from "@/lib/auth/social-oauth";
@@ -91,7 +92,7 @@ export async function GET(
     const redirectUri = `${env.APP_URL}/api/social/callback/${platform}`;
 
     // Exchange code for tokens
-    const tokens = await exchangeCodeForTokens(
+    let tokens = await exchangeCodeForTokens(
       config,
       code,
       redirectUri,
@@ -100,8 +101,20 @@ export async function GET(
       oauthState.codeVerifier
     );
 
+    // DEBUG: log raw token info for Instagram diagnostics
+    if (platform === "instagram") {
+      await kvSet("oauth_token_debug", {
+        tokenPrefix: tokens.accessToken?.slice(0, 40),
+        tokenLength: tokens.accessToken?.length,
+        expiresIn: tokens.expiresIn,
+        scope: tokens.scope,
+        userId: tokens.userId,
+      }, 3600);
+      // IGAA tokens from Instagram Business Login are already valid — no upgrade needed
+    }
+
     // Fetch platform profile
-    const profile = await fetchPlatformProfile(platform, tokens.accessToken);
+    const profile = await fetchPlatformProfile(platform, tokens.accessToken, tokens.userId);
 
     // Encrypt tokens
     const accessTokenEncrypted = await encryptToken(
