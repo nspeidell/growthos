@@ -7,11 +7,12 @@ import {
   Trash2,
   Send,
   Users,
-  TrendingUp,
   Loader2,
   Clock,
   CheckCircle2,
   BarChart3,
+  AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 import {
   listCommunities,
@@ -19,7 +20,9 @@ import {
   createCommunityPost,
   publishCommunityPost,
   deleteCommunity,
+  listConnectedAccountsByPlatform,
   type CommunityWithStats,
+  type ConnectedAccountSummary,
 } from "./actions";
 
 const PLATFORM_META: Record<string, { label: string; color: string }> = {
@@ -45,10 +48,27 @@ export default function CommunitiesDashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showPostForm, setShowPostForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  // Create form state
+  const [createPlatform, setCreatePlatform] = useState("facebook");
+  const [fbAccounts, setFbAccounts] = useState<ConnectedAccountSummary[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (createPlatform === "facebook") {
+      setLoadingAccounts(true);
+      listConnectedAccountsByPlatform("facebook").then((result) => {
+        if (result.success && result.data) setFbAccounts(result.data);
+        setLoadingAccounts(false);
+      });
+    } else {
+      setFbAccounts([]);
+    }
+  }, [createPlatform]);
 
   async function load() {
     setLoading(true);
@@ -81,8 +101,12 @@ export default function CommunitiesDashboard() {
   }
 
   function handlePublish(postId: string) {
+    setPublishError(null);
     startTransition(async () => {
-      await publishCommunityPost(postId);
+      const result = await publishCommunityPost(postId);
+      if (!result.success) {
+        setPublishError(result.error ?? "Failed to publish");
+      }
       await load();
     });
   }
@@ -166,6 +190,8 @@ export default function CommunitiesDashboard() {
                 <select
                   name="platform"
                   required
+                  value={createPlatform}
+                  onChange={(e) => setCreatePlatform(e.target.value)}
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:ring-1 focus:ring-ring"
                 >
                   <option value="facebook">Facebook Group</option>
@@ -176,13 +202,18 @@ export default function CommunitiesDashboard() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">
-                  Platform Group ID (optional)
+                  {createPlatform === "facebook" ? "Facebook Group ID" : createPlatform === "reddit" ? "Subreddit name (e.g. r/family)" : "Platform ID"}
                 </label>
                 <input
                   name="platformId"
                   className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground font-mono focus:border-ring focus:ring-1 focus:ring-ring"
-                  placeholder="e.g. 123456789"
+                  placeholder={createPlatform === "facebook" ? "e.g. 123456789012345" : createPlatform === "reddit" ? "family" : "ID or handle"}
                 />
+                {createPlatform === "facebook" && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Find in your group URL: facebook.com/groups/<strong>123456789</strong>
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1">
@@ -194,6 +225,51 @@ export default function CommunitiesDashboard() {
                   placeholder="Brief description"
                 />
               </div>
+
+              {/* Facebook account picker */}
+              {createPlatform === "facebook" && (
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    Connected Facebook Account (for publishing)
+                  </label>
+                  {loadingAccounts ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Loading accounts…
+                    </div>
+                  ) : fbAccounts.length === 0 ? (
+                    <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-sm text-warning">
+                      <AlertCircle className="inline w-4 h-4 mr-1" />
+                      No active Facebook account connected.{" "}
+                      <a href="/dashboard/publisher" className="underline">
+                        Connect one in Publisher
+                      </a>{" "}
+                      to enable posting. You can still add the community now.
+                    </div>
+                  ) : (
+                    <select
+                      name="connectedAccountId"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">— Select account (optional) —</option>
+                      {fbAccounts.map((acc) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.platformUsername ?? acc.platformAccountId}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              {/* Reddit notice */}
+              {createPlatform === "reddit" && (
+                <div className="md:col-span-2">
+                  <div className="rounded-lg border border-orange-200 bg-orange-50 dark:bg-orange-950/20 dark:border-orange-900/30 p-3 text-sm text-orange-700 dark:text-orange-400">
+                    <AlertCircle className="inline w-4 h-4 mr-1" />
+                    Reddit posts are created here as drafts for reference. Per your content strategy, Reddit posts should be submitted manually to preserve authenticity and avoid detection as brand marketing.
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex justify-end">
               <button
@@ -277,6 +353,14 @@ export default function CommunitiesDashboard() {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* Publish error banner */}
+                {publishError && (
+                  <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                    <span>{publishError}</span>
+                  </div>
+                )}
+
                 {/* Header */}
                 <div className="rounded-xl border border-border bg-card p-5">
                   <div className="flex items-start justify-between">
