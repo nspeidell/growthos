@@ -30,8 +30,10 @@ import {
   schedulePost,
   approvePost,
   cancelPost,
+  listPinterestBoards,
   type ScheduledPostWithDetails,
 } from "./actions";
+import type { PinterestBoard } from "@/lib/publishers/pinterest";
 import {
   listContentAssets,
   approveAndScheduleAll,
@@ -485,10 +487,39 @@ function ContentLibrary({ accounts, onScheduled }: { accounts: ConnectedAccount[
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleSuccess, setScheduleSuccess] = useState("");
 
+  // Pinterest board picker
+  const [pinterestBoards, setPinterestBoards] = useState<PinterestBoard[]>([]);
+  const [loadingBoards, setLoadingBoards] = useState(false);
+  const [selectedBoardId, setSelectedBoardId] = useState("");
+
   // Load ALL assets once (filter client-side for speed)
   useEffect(() => {
     loadAssets();
   }, []);
+
+  // Load Pinterest boards when a Pinterest account is selected
+  useEffect(() => {
+    if (!selectedAccountId) {
+      setPinterestBoards([]);
+      setSelectedBoardId("");
+      return;
+    }
+    const account = accounts.find((a) => a.id === selectedAccountId);
+    if (account?.platform !== "pinterest") {
+      setPinterestBoards([]);
+      setSelectedBoardId("");
+      return;
+    }
+    setLoadingBoards(true);
+    setSelectedBoardId("");
+    listPinterestBoards(selectedAccountId).then((result) => {
+      if (result.success && result.data) {
+        setPinterestBoards(result.data);
+        if (result.data.length > 0) setSelectedBoardId(result.data[0].id);
+      }
+      setLoadingBoards(false);
+    });
+  }, [selectedAccountId, accounts]);
 
   // Poll for in-progress media jobs
   useEffect(() => {
@@ -682,6 +713,14 @@ function ContentLibrary({ accounts, onScheduled }: { accounts: ConnectedAccount[
       return;
     }
 
+    const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+
+    // Pinterest requires a board selection
+    if (selectedAccount?.platform === "pinterest" && !selectedBoardId) {
+      setScheduleError("Select a Pinterest board.");
+      return;
+    }
+
     setScheduling(true);
     setScheduleError("");
 
@@ -690,6 +729,11 @@ function ContentLibrary({ accounts, onScheduled }: { accounts: ConnectedAccount[
     formData.set("connectedAccountId", selectedAccountId);
     formData.set("scheduledFor", new Date(scheduledFor).toISOString());
     formData.set("approvalMode", "manual");
+
+    // Attach Pinterest board ID in metadata so the publisher adapter can use it
+    if (selectedAccount?.platform === "pinterest" && selectedBoardId) {
+      formData.set("metadata", JSON.stringify({ boardId: selectedBoardId }));
+    }
 
     const result = await schedulePost(formData);
 
@@ -1128,10 +1172,47 @@ function ContentLibrary({ accounts, onScheduled }: { accounts: ConnectedAccount[
                             className="flex-1 rounded-md border border-neutral-300 bg-white text-neutral-900 px-2 py-1.5 text-xs"
                           />
                         </div>
+
+                        {/* Pinterest Board Picker — shown only when a Pinterest account is selected */}
+                        {accounts.find((a) => a.id === selectedAccountId)?.platform === "pinterest" && (
+                          <div>
+                            <label className="block text-xs font-medium text-neutral-600 mb-1">
+                              📌 Pinterest Board
+                            </label>
+                            {loadingBoards ? (
+                              <div className="flex items-center gap-2 text-xs text-neutral-500">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                Loading your boards…
+                              </div>
+                            ) : pinterestBoards.length === 0 ? (
+                              <p className="text-xs text-amber-600">
+                                No boards found. Create a board on Pinterest first, then reconnect.
+                              </p>
+                            ) : (
+                              <select
+                                value={selectedBoardId}
+                                onChange={(e) => setSelectedBoardId(e.target.value)}
+                                className="w-full rounded-md border border-neutral-300 bg-white text-neutral-900 px-2 py-1.5 text-xs"
+                              >
+                                {pinterestBoards.map((board) => (
+                                  <option key={board.id} value={board.id}>
+                                    {board.name}
+                                    {board.pin_count > 0 ? ` (${board.pin_count} pins)` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
+                        )}
+
                         <div className="flex gap-2">
                           <button
                             onClick={handleSchedule}
-                            disabled={scheduling || !selectedAccountId}
+                            disabled={
+                              scheduling ||
+                              !selectedAccountId ||
+                              (accounts.find((a) => a.id === selectedAccountId)?.platform === "pinterest" && !selectedBoardId)
+                            }
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
                           >
                             {scheduling ? (

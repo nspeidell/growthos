@@ -12,6 +12,8 @@ import {
   contentAssets,
 } from "@/lib/db/schema";
 import { safeAction, type ActionResult } from "@/lib/utils/api";
+import { decrypt } from "@/lib/utils/crypto";
+import { PinterestClient, type PinterestBoard } from "@/lib/publishers/pinterest";
 import type {
   ScheduledPost,
   ConnectedAccount,
@@ -187,6 +189,43 @@ export async function schedulePost(
     await db.insert(scheduledPosts).values(post);
 
     return post as ScheduledPost;
+  });
+}
+
+// ─── Pinterest Board Picker ───
+
+/**
+ * Fetch boards for a connected Pinterest account.
+ * Called client-side when user selects a Pinterest account in the schedule form.
+ */
+export async function listPinterestBoards(
+  connectedAccountId: string
+): Promise<ActionResult<PinterestBoard[]>> {
+  return safeAction(async () => {
+    const session = await requirePermission("publish:queue");
+    const { DB, ENCRYPTION_KEY } = getBindings();
+    const db = createDb(DB);
+
+    const account = await db
+      .select()
+      .from(connectedAccounts)
+      .where(
+        and(
+          eq(connectedAccounts.id, connectedAccountId),
+          eq(connectedAccounts.workspaceId, session.workspaceId),
+          eq(connectedAccounts.platform, "pinterest")
+        )
+      )
+      .get();
+
+    if (!account) throw new Error("Pinterest account not found");
+    if (account.accountStatus !== "active") {
+      throw new Error("Pinterest account token is expired — please reconnect");
+    }
+
+    const accessToken = await decrypt(account.accessTokenEncrypted, ENCRYPTION_KEY);
+    const client = new PinterestClient(accessToken);
+    return client.listBoards({ privacy: "ALL" });
   });
 }
 
