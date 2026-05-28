@@ -17,6 +17,7 @@ import {
 import { safeAction, type ActionResult } from "@/lib/utils/api";
 import { generateWithClaude } from "@/lib/ai/claude";
 import { buildSystemPrompt, type PromptContext } from "@/lib/ai/doctrine";
+import { getPerformanceContextForPrompt } from "@/lib/ai/performance-context";
 import { ContentAgent } from "@/lib/swarm/agents/content";
 import type { AgentContext } from "@/lib/swarm/agents/base-agent";
 import type {
@@ -181,6 +182,14 @@ export async function createAndGenerate(
     });
 
     // Build prompt and generate content
+    // Fetch historical performance data for this platform to inject as context.
+    // Non-blocking — if no data exists yet, returns empty string.
+    const performanceContext = await getPerformanceContextForPrompt(
+      DB,
+      session.workspaceId,
+      input.platform as Platform
+    );
+
     const promptCtx: PromptContext = {
       mode: input.doctrineMode as DoctrineMode,
       brand: {
@@ -191,6 +200,7 @@ export async function createAndGenerate(
       },
       platform: input.platform as Platform,
       contentType: input.contentType as ContentType,
+      additionalContext: performanceContext || undefined,
     };
 
     const systemPrompt = buildSystemPrompt(promptCtx);
@@ -338,6 +348,13 @@ export async function createAndGenerateMultiPlatform(
       const platform = parsed.platforms[i]!;
       const contentType = parsed.contentTypes[i]!;
 
+      // Inject historical performance data for this platform
+      const perfContext = await getPerformanceContextForPrompt(
+        DB,
+        session.workspaceId,
+        platform as Platform
+      );
+
       const promptCtx: PromptContext = {
         mode: parsed.doctrineMode as DoctrineMode,
         brand: {
@@ -348,6 +365,7 @@ export async function createAndGenerateMultiPlatform(
         },
         platform: platform as Platform,
         contentType: contentType as ContentType,
+        additionalContext: perfContext || undefined,
       };
 
       const systemPrompt = buildSystemPrompt(promptCtx);

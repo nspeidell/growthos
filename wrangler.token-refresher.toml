@@ -1,0 +1,23 @@
+name = "growthos-token-refresher"
+main = "src/workers/token-refresher.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Database ───
+[[d1_databases]]
+binding = "DB"
+database_name = "growthos-prod"
+database_id = "2b46db77-e682-45de-8205-b223246b7334"
+
+# ─── Cron: refresh expiring tokens every hour ───
+[triggers]
+crons = ["0 * * * *"]
+
+# ─── Secrets (set once via CLI) ───
+# wrangler secret put ENCRYPTION_KEY --config wrangler.token-refresher.toml
+# wrangler secret put META_APP_ID --config wrangler.token-refresher.toml
+# wrangler secret put META_APP_SECRET --config wrangler.token-refresher.toml
+# wrangler secret put X_CLIENT_ID --config wrangler.token-refresher.toml
+# wrangler secret put X_CLIENT_SECRET --config wrangler.token-refresher.toml
+# wrangler secret put LINKEDIN_CLIENT_ID --config wrangler.token-refresher.toml
+# wrangler secret put LINKEDIN_CLIENT_SECRET --config wrangler.token-refresher.toml

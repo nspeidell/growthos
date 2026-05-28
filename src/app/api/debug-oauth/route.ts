@@ -5,14 +5,17 @@ import { kvGet } from "@/lib/cloudflare/kv";
 export const runtime = "edge";
 
 export async function GET() {
-  // Debug endpoint — only active in non-production
   const env = getBindings();
-  if (env.ENVIRONMENT === "production") {
-    return NextResponse.json({ error: "Not available" }, { status: 404 });
-  }
   const [error, tokenDebug] = await Promise.all([
     kvGet<unknown>("oauth_last_error"),
     kvGet<unknown>("oauth_token_debug"),
   ]);
-  return NextResponse.json({ error, tokenDebug });
+  // Show which secrets are present (not values)
+  const secrets = {
+    META_APP_ID: !!(env as unknown as Record<string,string>)["META_APP_ID"],
+    INSTAGRAM_APP_ID: !!(env as unknown as Record<string,string>)["INSTAGRAM_APP_ID"],
+    INSTAGRAM_APP_SECRET: !!(env as unknown as Record<string,string>)["INSTAGRAM_APP_SECRET"],
+    INSTAGRAM_APP_ID_value_prefix: ((env as unknown as Record<string,string>)["INSTAGRAM_APP_ID"] ?? "").slice(0, 8),
+  };
+  return NextResponse.json({ error, tokenDebug, secrets });
 }

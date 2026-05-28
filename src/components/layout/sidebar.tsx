@@ -26,6 +26,7 @@ import {
   Brain,
   FlaskConical,
   Radio,
+  Star,
 } from "lucide-react";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 
@@ -48,6 +49,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/dashboard/ads", label: "Ads", icon: Megaphone },
   { href: "/dashboard/signals", label: "Signals", icon: Radio },
+  { href: "/dashboard/influencers", label: "Influencers", icon: Star },
   { href: "/dashboard/swarm", label: "Swarm", icon: Brain },
   { href: "/dashboard/experiments", label: "Experiments", icon: FlaskConical },
   { href: "/dashboard/reunion", label: "Reunion", icon: Users },

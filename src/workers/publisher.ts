@@ -27,6 +27,7 @@ interface PublishJobMessage {
   refreshTokenEncrypted?: string;
   tokenExpiresAt?: number; // Unix timestamp in seconds
   connectedAccountId: string;
+  platformAccountId?: string;
   metadata?: string;
   retryCount: number;
 }
@@ -75,14 +76,124 @@ async function refreshXToken(
   };
 }
 
+// ─── Token Refresh Helpers (hourly cron) ─────────────────────────────────────
+
+async function runTokenRefresh(env: CloudflareEnv): Promise<void> {
+  const REFRESH_WINDOW_SEC = 24 * 60 * 60; // refresh tokens expiring within 24h
+  const nowSec = Math.floor(Date.now() / 1000);
+  const windowSec = nowSec + REFRESH_WINDOW_SEC;
+
+  const { results } = await env.DB.prepare(
+    `SELECT id, platform, access_token_encrypted, refresh_token_encrypted, token_expires_at
+     FROM connected_accounts
+     WHERE account_status = 'active'
+       AND token_expires_at IS NOT NULL
+       AND token_expires_at <= ?
+     ORDER BY token_expires_at ASC
+     LIMIT 100`
+  ).bind(windowSec).all<{
+    id: string;
+    platform: string;
+    access_token_encrypted: string;
+    refresh_token_encrypted: string | null;
+    token_expires_at: number | null;
+  }>();
+
+  if (!results || results.length === 0) return;
+  console.log(`[publisher/token-refresh] ${results.length} account(s) due for refresh`);
+
+  for (const account of results) {
+    try {
+      const env2 = env as unknown as Record<string, string>;
+
+      if (account.platform === "x") {
+        if (!account.refresh_token_encrypted) continue;
+        const refreshToken = await decrypt(account.refresh_token_encrypted, env.ENCRYPTION_KEY);
+        const res = await fetch("https://api.x.com/2/oauth2/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: "Basic " + btoa(`${env2["X_CLIENT_ID"]}:${env2["X_CLIENT_SECRET"]}`),
+          },
+          body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken }),
+        });
+        if (!res.ok) throw new Error(`X refresh failed: ${await res.text()}`);
+        const d = await res.json() as { access_token: string; refresh_token: string; expires_in: number };
+        await env.DB.prepare(
+          `UPDATE connected_accounts SET access_token_encrypted=?, refresh_token_encrypted=?, token_expires_at=?, account_status='active', updated_at=? WHERE id=?`
+        ).bind(await encrypt(d.access_token, env.ENCRYPTION_KEY), await encrypt(d.refresh_token, env.ENCRYPTION_KEY), nowSec + d.expires_in, Date.now(), account.id).run();
+
+      } else if (account.platform === "facebook") {
+        const accessToken = await decrypt(account.access_token_encrypted, env.ENCRYPTION_KEY);
+        const res = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${env2["META_APP_ID"]}&client_secret=${env2["META_APP_SECRET"]}&fb_exchange_token=${accessToken}`);
+        if (!res.ok) throw new Error(`Facebook refresh failed: ${await res.text()}`);
+        const d = await res.json() as { access_token: string; expires_in?: number };
+        await env.DB.prepare(
+          `UPDATE connected_accounts SET access_token_encrypted=?, token_expires_at=?, account_status='active', updated_at=? WHERE id=?`
+        ).bind(await encrypt(d.access_token, env.ENCRYPTION_KEY), nowSec + (d.expires_in ?? 5183944), Date.now(), account.id).run();
+
+      } else if (account.platform === "instagram") {
+        const accessToken = await decrypt(account.access_token_encrypted, env.ENCRYPTION_KEY);
+        const res = await fetch(`https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=${accessToken}`);
+        if (!res.ok) throw new Error(`Instagram refresh failed: ${await res.text()}`);
+        const d = await res.json() as { access_token: string; expires_in: number };
+        await env.DB.prepare(
+          `UPDATE connected_accounts SET access_token_encrypted=?, token_expires_at=?, account_status='active', updated_at=? WHERE id=?`
+        ).bind(await encrypt(d.access_token, env.ENCRYPTION_KEY), nowSec + d.expires_in, Date.now(), account.id).run();
+
+      } else if (account.platform === "threads") {
+        const accessToken = await decrypt(account.access_token_encrypted, env.ENCRYPTION_KEY);
+        const res = await fetch(`https://graph.threads.net/refresh_access_token?grant_type=th_refresh_token&access_token=${accessToken}`);
+        if (!res.ok) throw new Error(`Threads refresh failed: ${await res.text()}`);
+        const d = await res.json() as { access_token: string; expires_in: number };
+        await env.DB.prepare(
+          `UPDATE connected_accounts SET access_token_encrypted=?, token_expires_at=?, account_status='active', updated_at=? WHERE id=?`
+        ).bind(await encrypt(d.access_token, env.ENCRYPTION_KEY), nowSec + d.expires_in, Date.now(), account.id).run();
+
+      } else if (account.platform === "linkedin") {
+        if (!account.refresh_token_encrypted) continue;
+        const refreshToken = await decrypt(account.refresh_token_encrypted, env.ENCRYPTION_KEY);
+        const res = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: env2["LINKEDIN_CLIENT_ID"] ?? "", client_secret: env2["LINKEDIN_CLIENT_SECRET"] ?? "" }),
+        });
+        if (!res.ok) throw new Error(`LinkedIn refresh failed: ${await res.text()}`);
+        const d = await res.json() as { access_token: string; refresh_token?: string; expires_in: number };
+        await env.DB.prepare(
+          `UPDATE connected_accounts SET access_token_encrypted=?, refresh_token_encrypted=?, token_expires_at=?, account_status='active', updated_at=? WHERE id=?`
+        ).bind(await encrypt(d.access_token, env.ENCRYPTION_KEY), d.refresh_token ? await encrypt(d.refresh_token, env.ENCRYPTION_KEY) : account.refresh_token_encrypted, nowSec + d.expires_in, Date.now(), account.id).run();
+      }
+
+      console.log(`[publisher/token-refresh] Refreshed ${account.platform} (${account.id})`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[publisher/token-refresh] Failed ${account.platform} (${account.id}): ${msg}`);
+      await env.DB.prepare(
+        `UPDATE connected_accounts SET account_status='error', updated_at=? WHERE id=?`
+      ).bind(Date.now(), account.id).run();
+    }
+  }
+}
+
+// ─── Main Export ─────────────────────────────────────────────────────────────
+
 export default {
   /**
-   * Cron trigger: find due posts and enqueue them.
+   * Cron triggers:
+   * "* * * * *"  → publish due posts
+   * "0 * * * *"  → token refresh (all platforms)
    */
   async scheduled(
-    _event: ScheduledEvent,
+    event: ScheduledEvent,
     env: CloudflareEnv
   ): Promise<void> {
+    // Route hourly cron to token refresh
+    if (event.cron === "0 * * * *") {
+      await runTokenRefresh(env);
+      return;
+    }
+
     const now = Date.now();
 
     // Find queued posts that are due
@@ -91,6 +202,7 @@ export default {
          sp.id, sp.platform, sp.content_asset_id, sp.connected_account_id,
          sp.metadata, sp.retry_count,
          ca.id as account_id,
+         ca.platform_account_id,
          ca.access_token_encrypted,
          ca.refresh_token_encrypted,
          ca.token_expires_at,
@@ -98,7 +210,7 @@ export default {
        FROM scheduled_posts sp
        JOIN connected_accounts ca ON sp.connected_account_id = ca.id
        JOIN content_assets cas ON sp.content_asset_id = cas.id
-       WHERE sp.post_status = 'queued'
+       WHERE sp.post_status IN ('queued', 'approved')
          AND sp.scheduled_for <= ?
          AND ca.account_status = 'active'
        ORDER BY sp.scheduled_for ASC
@@ -110,6 +222,7 @@ export default {
         platform: string;
         content_body: string;
         account_id: string;
+        platform_account_id: string | null;
         access_token_encrypted: string;
         refresh_token_encrypted: string | null;
         token_expires_at: number | null;
@@ -127,6 +240,14 @@ export default {
         .bind(now, post.id)
         .run();
 
+      // Merge platform_account_id into metadata so adapters can use it
+      let mergedMetadata = post.metadata ?? undefined;
+      if (post.platform_account_id) {
+        const existing = post.metadata ? JSON.parse(post.metadata) as Record<string, unknown> : {};
+        existing._platformAccountId = post.platform_account_id;
+        mergedMetadata = JSON.stringify(existing);
+      }
+
       const message: PublishJobMessage = {
         postId: post.id,
         platform: post.platform,
@@ -135,7 +256,8 @@ export default {
         refreshTokenEncrypted: post.refresh_token_encrypted ?? undefined,
         tokenExpiresAt: post.token_expires_at ?? undefined,
         connectedAccountId: post.account_id,
-        metadata: post.metadata ?? undefined,
+        platformAccountId: post.platform_account_id ?? undefined,
+        metadata: mergedMetadata,
         retryCount: post.retry_count,
       };
 

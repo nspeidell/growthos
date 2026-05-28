@@ -143,8 +143,9 @@ export const PLATFORM_OAUTH_CONFIGS: Record<string, PlatformOAuthConfig> = {
       "threads_content_publish",
       "threads_manage_insights",
     ],
-    clientIdEnvKey: "META_APP_ID",
-    clientSecretEnvKey: "META_APP_SECRET",
+    scopeSeparator: ",",
+    clientIdEnvKey: "THREADS_APP_ID",
+    clientSecretEnvKey: "THREADS_APP_SECRET",
   },
   wordpress: {
     platform: "wordpress",
@@ -439,7 +440,7 @@ export async function fetchPlatformProfile(
     case "google_business":
       return fetchGoogleBusinessProfile(accessToken);
     case "threads":
-      return fetchThreadsProfile(accessToken);
+      return fetchThreadsProfile(accessToken, userId);
     case "wordpress":
       return fetchWordPressProfile(accessToken);
     case "medium":
@@ -518,6 +519,25 @@ async function fetchInstagramProfile(
 async function fetchFacebookProfile(
   accessToken: string
 ): Promise<PlatformProfile> {
+  // First try to get managed Pages — store the Page ID so the publisher
+  // can use it to fetch a Page access token and post to the Page feed.
+  const pagesRes = await fetch(
+    `https://graph.facebook.com/v21.0/me/accounts?fields=id,name,picture&access_token=${accessToken}`
+  );
+  const pagesData = await pagesRes.json() as {
+    data?: Array<{ id: string; name: string; picture?: { data?: { url?: string } } }>;
+  };
+
+  const page = pagesData.data?.[0];
+  if (page) {
+    return {
+      platformAccountId: page.id, // Store Page ID — used as fallback in publisher
+      username: page.name,
+      avatarUrl: page.picture?.data?.url,
+    };
+  }
+
+  // Fallback: no Pages found — store personal profile ID
   const res = await fetch(
     `https://graph.facebook.com/v21.0/me?fields=id,name,picture&access_token=${accessToken}`
   );
@@ -677,22 +697,40 @@ async function fetchGoogleBusinessProfile(
 }
 
 async function fetchThreadsProfile(
-  accessToken: string
+  accessToken: string,
+  userId?: string
 ): Promise<PlatformProfile> {
-  const res = await fetch(
-    `https://graph.threads.net/v1.0/me?fields=id,username,threads_profile_picture_url&access_token=${accessToken}`
-  );
-  const data = await res.json() as {
-    id: string;
-    username: string;
-    threads_profile_picture_url?: string;
-  };
+  try {
+    const res = await fetch(
+      `https://graph.threads.net/v1.0/me?fields=id,username,threads_profile_picture_url&access_token=${accessToken}`
+    );
+    const data = await res.json() as {
+      id?: string;
+      username?: string;
+      threads_profile_picture_url?: string;
+    };
 
-  return {
-    platformAccountId: data.id,
-    username: data.username ?? "threads_user",
-    avatarUrl: data.threads_profile_picture_url,
-  };
+    if (data.id) {
+      return {
+        platformAccountId: data.id,
+        username: data.username ?? "threads_user",
+        avatarUrl: data.threads_profile_picture_url,
+      };
+    }
+  } catch {
+    // fall through to userId fallback
+  }
+
+  // Fallback: use userId from token exchange response
+  if (userId) {
+    return {
+      platformAccountId: userId,
+      username: "threads_user",
+      avatarUrl: undefined,
+    };
+  }
+
+  throw new Error("Threads profile fetch failed and no userId available from token exchange");
 }
 
 async function fetchWordPressProfile(

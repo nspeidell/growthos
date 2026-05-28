@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 import { getBindings } from "@/lib/cloudflare/bindings";
 import { decrypt } from "@/lib/utils/crypto";
 import { publishToplatform } from "@/lib/publishers/adapters";
+import { createTrace, logPostFailed } from "@/lib/db/event-logger";
 
 export const runtime = "edge";
 
@@ -39,7 +40,7 @@ async function handlePublish() {
   // Find queued posts that are due
   const { results: duePosts } = await env.DB.prepare(
     `SELECT
-       sp.id, sp.platform, sp.retry_count, sp.metadata,
+       sp.id, sp.workspace_id, sp.platform, sp.retry_count, sp.metadata,
        ca.id as connected_account_id,
        ca.access_token_encrypted,
        ca.refresh_token_encrypted,
@@ -49,7 +50,7 @@ async function handlePublish() {
      FROM scheduled_posts sp
      JOIN connected_accounts ca ON sp.connected_account_id = ca.id
      JOIN content_assets cas ON sp.content_asset_id = cas.id
-     WHERE sp.post_status = 'queued'
+     WHERE sp.post_status  = 'queued'
        AND sp.scheduled_for <= ?
        AND ca.account_status = 'active'
      ORDER BY sp.scheduled_for ASC
@@ -58,6 +59,7 @@ async function handlePublish() {
     .bind(now)
     .all<{
       id: string;
+      workspace_id: string;
       platform: string;
       retry_count: number;
       metadata: string | null;
@@ -76,6 +78,8 @@ async function handlePublish() {
   const results: Array<{ id: string; status: string; error?: string }> = [];
 
   for (const post of duePosts) {
+    const { traceId, trace } = createTrace(env.DB, post.workspace_id);
+
     // Mark as publishing
     await env.DB.prepare(
       `UPDATE scheduled_posts SET post_status = 'publishing', updated_at = ? WHERE id = ?`
@@ -153,7 +157,7 @@ async function handlePublish() {
       // Pass the connected account's platform_account_id so adapters can
       // use it as a fallback (e.g. Facebook page ID for New Pages Experience)
       if (post.platform_account_id) {
-        metadata._accountId = post.platform_account_id;
+        metadata._platformAccountId = post.platform_account_id;
       }
 
       const result = await publishToplatform(post.platform, {
@@ -173,6 +177,12 @@ async function handlePublish() {
       )
         .bind(result.platformPostId, result.platformPostUrl, now, now, post.id)
         .run();
+
+      await trace("post.published", post.platform as Parameters<typeof trace>[1], {
+        postId: post.id,
+        platformPostId: result.platformPostId,
+        platformPostUrl: result.platformPostUrl,
+      }, { resourceType: "post", resourceId: post.id });
 
       results.push({ id: post.id, status: "published" });
     } catch (err) {
@@ -205,6 +215,15 @@ async function handlePublish() {
           post.id
         )
         .run();
+
+      await logPostFailed(
+        env.DB,
+        post.workspace_id,
+        post.id,
+        post.platform,
+        errorMessage,
+        traceId
+      );
 
       results.push({ id: post.id, status: newStatus, error: errorMessage });
     }
