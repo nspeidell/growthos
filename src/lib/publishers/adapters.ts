@@ -5,6 +5,8 @@
  * Returns the platform post ID and URL on success.
  */
 
+import { PinterestClient } from "./pinterest";
+
 export interface PublishResult {
   platformPostId: string;
   platformPostUrl: string;
@@ -34,77 +36,91 @@ export async function publishToplatform(
       return publishToX(payload);
     case "reddit":
       return publishToReddit(payload);
+    case "threads":
+      return publishToThreads(payload);
+    case "linkedin":
+      return publishToLinkedIn(payload);
+    case "pinterest":
+      return publishToPinterest(payload);
     default:
       throw new Error(`Unsupported platform: ${platform}`);
   }
 }
 
-// ─── Instagram (via Graph API) ───
+// ─── Instagram (via Instagram Business Login — graph.instagram.com) ───
 
 async function publishToInstagram(
   payload: PublishPayload
 ): Promise<PublishResult> {
   const { body, accessToken, metadata } = payload;
   const imageUrl = metadata?.imageUrl as string | undefined;
+  // Stored during OAuth connect via Instagram Business Login (graph.instagram.com/me)
+  const igUserId = metadata?._platformAccountId as string | undefined;
 
-  // Get pages to find Instagram account
-  const pagesRes = await fetch(
-    `https://graph.facebook.com/v21.0/me/accounts?access_token=${accessToken}`
-  );
-  const pages = await pagesRes.json() as { data: Array<{ id: string; access_token: string }> };
-  const page = pages.data?.[0];
-
-  if (!page) throw new Error("No Facebook Page found for Instagram publishing");
-
-  // Get Instagram business account ID
-  const igRes = await fetch(
-    `https://graph.facebook.com/v21.0/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`
-  );
-  const igData = await igRes.json() as { instagram_business_account?: { id: string } };
-
-  if (!igData.instagram_business_account) {
-    throw new Error("No Instagram Business account linked");
+  if (!igUserId) {
+    throw new Error(
+      "Instagram publish requires platform_account_id — reconnect the Instagram account"
+    );
   }
 
-  const igId = igData.instagram_business_account.id;
-
-  if (imageUrl) {
-    // Image post: create media container, then publish
-    const containerRes = await fetch(
-      `https://graph.facebook.com/v21.0/${igId}/media`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          image_url: imageUrl,
-          caption: body,
-          access_token: page.access_token,
-        }),
-      }
+  if (!imageUrl) {
+    throw new Error(
+      "Instagram requires an image — attach media to this content"
     );
-    const container = await containerRes.json() as { id: string };
-
-    const publishRes = await fetch(
-      `https://graph.facebook.com/v21.0/${igId}/media_publish`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          creation_id: container.id,
-          access_token: page.access_token,
-        }),
-      }
-    );
-    const published = await publishRes.json() as { id: string };
-
-    return {
-      platformPostId: published.id,
-      platformPostUrl: `https://www.instagram.com/p/${published.id}/`,
-    };
   }
 
-  // Text-only not supported on Instagram — require an image
-  throw new Error("Instagram requires an image — attach media to this content");
+  // Step 1: Create media container (Instagram Business Login uses graph.instagram.com)
+  const containerRes = await fetch(
+    `https://graph.instagram.com/v21.0/${igUserId}/media`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_url: imageUrl,
+        caption: body,
+        access_token: accessToken,
+      }),
+    }
+  );
+
+  if (!containerRes.ok) {
+    const err = await containerRes.text();
+    throw new Error(
+      `Instagram media container creation failed (${containerRes.status}): ${err}`
+    );
+  }
+
+  const container = await containerRes.json() as { id?: string; error?: { message: string } };
+  if (!container.id) {
+    throw new Error(
+      `Instagram container missing id: ${JSON.stringify(container)}`
+    );
+  }
+
+  // Step 2: Publish the container
+  const publishRes = await fetch(
+    `https://graph.instagram.com/v21.0/${igUserId}/media_publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creation_id: container.id,
+        access_token: accessToken,
+      }),
+    }
+  );
+
+  if (!publishRes.ok) {
+    const err = await publishRes.text();
+    throw new Error(`Instagram publish failed (${publishRes.status}): ${err}`);
+  }
+
+  const published = await publishRes.json() as { id?: string };
+
+  return {
+    platformPostId: published.id ?? container.id,
+    platformPostUrl: `https://www.instagram.com/p/${published.id ?? container.id}/`,
+  };
 }
 
 // ─── Facebook (Page Posts via Graph API) ───
@@ -130,8 +146,8 @@ async function publishToFacebook(
 
   // Fallback for New Pages Experience: /me/accounts returns empty for NPE pages.
   // Try fetching the page token directly using the stored platform_account_id.
-  if (!page && metadata?._accountId) {
-    const pageId = metadata._accountId as string;
+  if (!page && metadata?._platformAccountId) {
+    const pageId = metadata._platformAccountId as string;
     const directRes = await fetch(
       `https://graph.facebook.com/v21.0/${pageId}?fields=id,name,access_token&access_token=${accessToken}`
     );
@@ -301,5 +317,173 @@ async function publishToReddit(
   return {
     platformPostId: data.json.data.name,
     platformPostUrl: data.json.data.url,
+  };
+}
+
+// ─── Threads ───
+
+async function publishToThreads(payload: PublishPayload): Promise<PublishResult> {
+  const { body, accessToken, metadata } = payload;
+  const userId = (metadata?._platformAccountId as string | undefined);
+
+  if (!userId) {
+    throw new Error("Threads publish requires platform_account_id — reconnect the Threads account");
+  }
+
+  // Step 1: Create a text-only media container
+  const containerRes = await fetch(
+    `https://graph.threads.net/v1.0/${userId}/threads`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        media_type: "TEXT",
+        text: body.substring(0, 500), // Threads limit
+        access_token: accessToken,
+      }),
+    }
+  );
+
+  if (!containerRes.ok) {
+    const err = await containerRes.text();
+    throw new Error(`Threads container creation failed (${containerRes.status}): ${err}`);
+  }
+
+  const container = await containerRes.json() as { id?: string; error?: { message: string } };
+  if (!container.id) {
+    throw new Error(`Threads container missing id: ${JSON.stringify(container)}`);
+  }
+
+  // Step 2: Publish the container
+  const publishRes = await fetch(
+    `https://graph.threads.net/v1.0/${userId}/threads_publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creation_id: container.id,
+        access_token: accessToken,
+      }),
+    }
+  );
+
+  if (!publishRes.ok) {
+    const err = await publishRes.text();
+    throw new Error(`Threads publish failed (${publishRes.status}): ${err}`);
+  }
+
+  const published = await publishRes.json() as { id?: string };
+
+  return {
+    platformPostId: published.id ?? container.id,
+    platformPostUrl: `https://www.threads.net/t/${published.id ?? container.id}`,
+  };
+}
+
+// ─── Pinterest ───
+
+/**
+ * Publish a Pin to Pinterest.
+ *
+ * Required metadata fields (set in scheduled_posts.metadata JSON):
+ *   - boardId:   Pinterest Board ID to pin to (get from listBoards)
+ *   - imageUrl:  Publicly accessible image URL for the pin
+ *
+ * Optional metadata fields:
+ *   - title:     Pin title (falls back to first 100 chars of body)
+ *   - link:      Destination URL when user clicks pin
+ *   - altText:   Image alt text for accessibility
+ *   - boardSectionId: Board section to file pin under
+ *   - hashtags:  Array of hashtag strings appended to description
+ */
+async function publishToPinterest(payload: PublishPayload): Promise<PublishResult> {
+  const { body, accessToken, metadata } = payload;
+
+  const boardId = metadata?.boardId as string | undefined;
+  const imageUrl = metadata?.imageUrl as string | undefined;
+
+  if (!boardId) {
+    throw new Error(
+      "Pinterest publish requires a boardId in metadata. " +
+      "Set it when scheduling the post, or connect a default board in Pinterest settings."
+    );
+  }
+
+  if (!imageUrl) {
+    throw new Error(
+      "Pinterest requires an image URL — attach media to this content before scheduling."
+    );
+  }
+
+  const title = (metadata?.title as string | undefined) ?? body.substring(0, 100);
+  const link = metadata?.link as string | undefined;
+  const altText = metadata?.altText as string | undefined;
+  const boardSectionId = metadata?.boardSectionId as string | undefined;
+  const hashtags = (metadata?.hashtags as string[] | undefined) ?? [];
+
+  const description = PinterestClient.formatDescription(body, hashtags);
+
+  const client = new PinterestClient(accessToken);
+
+  const pin = await client.createPin({
+    boardId,
+    title,
+    description,
+    imageUrl,
+    link,
+    altText,
+    boardSectionId,
+  });
+
+  return {
+    platformPostId: pin.id,
+    platformPostUrl: `https://www.pinterest.com/pin/${pin.id}/`,
+  };
+}
+
+// ─── LinkedIn ───
+
+async function publishToLinkedIn(payload: PublishPayload): Promise<PublishResult> {
+  const { body, accessToken, metadata } = payload;
+  const personId = (metadata?._platformAccountId as string | undefined);
+
+  if (!personId) {
+    throw new Error("LinkedIn publish requires platform_account_id — reconnect the LinkedIn account");
+  }
+
+  const authorUrn = `urn:li:person:${personId}`;
+
+  const res = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      "X-Restli-Protocol-Version": "2.0.0",
+    },
+    body: JSON.stringify({
+      author: authorUrn,
+      lifecycleState: "PUBLISHED",
+      specificContent: {
+        "com.linkedin.ugc.ShareContent": {
+          shareCommentary: { text: body.substring(0, 3000) },
+          shareMediaCategory: "NONE",
+        },
+      },
+      visibility: {
+        "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC",
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`LinkedIn publish failed (${res.status}): ${err}`);
+  }
+
+  const postId = res.headers.get("x-restli-id") ?? "unknown";
+
+  return {
+    platformPostId: postId,
+    platformPostUrl: `https://www.linkedin.com/feed/update/${postId}/`,
   };
 }

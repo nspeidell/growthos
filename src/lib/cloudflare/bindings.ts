@@ -32,10 +32,14 @@ export interface CloudflareEnv {
   META_APP_SECRET: string;
   INSTAGRAM_APP_ID: string;
   INSTAGRAM_APP_SECRET: string;
+  THREADS_APP_ID: string;
+  THREADS_APP_SECRET: string;
   X_CLIENT_ID: string;
   X_CLIENT_SECRET: string;
   REDDIT_CLIENT_ID: string;
   REDDIT_CLIENT_SECRET: string;
+  PINTEREST_CLIENT_ID: string;
+  PINTEREST_CLIENT_SECRET: string;
 
   // Phase 6: Reunion API
   REUNION_API_URL: string;
