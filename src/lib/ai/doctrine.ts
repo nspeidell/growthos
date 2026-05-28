@@ -239,12 +239,34 @@ const PLATFORM_CONSTRAINTS: Record<string, string> = {
     "TONE: Professional but deeply human. Founder-voice essays and frameworks. Carousels for step-by-step insights.",
 
   pinterest:
-    "Platform: Pinterest. Title max 100 chars, keyword-rich. Description 200–500 chars with natural keyword placement. " +
-    "DEMOGRAPHIC: Core audience women 25–54, especially moms, planners, and family-oriented users. Pinterest is a SEARCH ENGINE, not a social platform — content is discovered through keyword search, not feed algorithms. " +
-    "CONTENT STRATEGY: Pinterest is Reunion's evergreen SEO engine. Best content: family traditions, memory ideas, conversation starters, family games, legacy ideas, sentimental quotes, family activity guides. Vertical graphics, infographics, list posts, quote graphics. Seasonal and evergreen content both perform. Save-worthy framing is critical — 'save this for later' energy. " +
-    "SEO KEYWORDS TO USE: 'family traditions', 'memory preservation', 'family connection ideas', 'family conversation starters', 'family game night', 'questions to ask grandparents', 'family bonding activities', 'family legacy ideas'. " +
-    "TOP METRICS: Saves, monthly viewers, click-through to website. " +
-    "TONE: Aspirational, warm, practical. Discovery-focused framing ('10 ways to...', 'the ultimate guide to...').",
+    "Platform: Pinterest. CRITICAL: Pinterest is NOT a social platform. It is a VISUAL DISCOVERY ENGINE + EMOTIONAL SEARCH ENGINE. People use it to imagine a better life, save ideas, feel inspired, and plan their future. Treat it like visual Google. " +
+    "Title max 100 chars — keyword-rich, emotionally resonant. Description 200–500 chars with natural keyword placement. NEVER write descriptions that feel like ads or marketing copy. " +
+    "WHAT WE ARE SELLING: warmth, belonging, traditions, memories, togetherness, legacy, family presence. NOT the app, NOT features, NOT technology. " +
+    "DEMOGRAPHIC: Core audience women 25–54 (moms, grandmothers, family planners). Secondary: parents 28–45, grandparents 55–75. Also: homeschool communities, church families, military families, blended families. " +
+    "THE 12 REUNION BOARDS AND WHAT TO PIN TO EACH: " +
+    "(1) 'Family Traditions Worth Keeping' — holiday traditions, weekly rituals, family night ideas, birthday traditions, generational activities. Keywords: family traditions, family ritual ideas, meaningful traditions. " +
+    "(2) 'Questions to Ask Your Grandparents' — conversation prompts, legacy questions, memory preservation, storytelling prompts. THIS IS THE HIGHEST-POTENTIAL BOARD. Keywords: questions for grandparents, family history questions, preserving family stories, conversation starters. " +
+    "(3) 'The Digital Family Living Room' — warm aesthetic imagery, cozy family spaces, cinematic family moments. Brand identity and emotional visual world. " +
+    "(4) 'Family Connection Ideas' — activities, games, discussion prompts, family challenges. Keywords: family bonding activities, family connection ideas. " +
+    "(5) 'Family Group Chat Humor' — relatable memes, funny family texts, generational humor, 'mom texts'. Use for personality and younger audience reach. " +
+    "(6) 'Memory Keeping Without Feeling Cringe' — authentic memory preservation, candid photos, real moments, storytelling. Modernize memory culture. Keywords: memory preservation, family storytelling. " +
+    "(7) 'Family Dinner & Gathering Inspiration' — family tables, recipes, gatherings, hospitality, connection rituals. Massive overlap with moms and grandparents. " +
+    "(8) 'Raising Connected Kids' — family bonding, tech balance, traditions, emotional intelligence. Keywords: intentional parenting, family connection, raising connected children. " +
+    "(9) 'Family Legacy Ideas' — memory books, legacy letters, family values, ancestry. Positioning: 'Be the founder of your family legacy.' Keywords: family legacy, family history, preserving family stories. " +
+    "(10) 'Cozy Family Life' — warmth, togetherness, cozy home moments, soft nostalgic imagery. Defines Reunion's visual emotional world. " +
+    "(11) 'Family Reunion Ideas' — games, shirts, activities, planning. MASSIVE search volume. Pull organic discovery traffic. " +
+    "(12) 'AI for Families' — helping families stay connected, memory resurfacing. NEVER position AI as surveillance or analytics. Keep it invisible, assistive, connective. " +
+    "PIN FORMATS THAT PERFORM BEST: " +
+    "(1) TEXT-OVER-IMAGE EMOTIONAL PINS (highest saves): 'One day the loud family dinners become memories.' / 'The stories disappear when nobody shares them.' / 'The blurry photos become your favorites later.' " +
+    "(2) CAROUSEL/STEP PINS: '10 Questions To Ask Your Grandparents' / '5 Family Traditions Worth Starting' / 'How To Keep Long-Distance Families Close' " +
+    "(3) CINEMATIC LIFESTYLE IMAGERY: warm kitchens, couches, old photos, gatherings, grandparents, family tables " +
+    "(4) HUMOR PINS: family text memes, generational jokes, family chaos observations " +
+    "PRIMARY SEO KEYWORDS: family connection, family traditions, family memories, family bonding, questions for grandparents, preserving memories, intentional family life, family gathering ideas. " +
+    "LONG-TAIL KEYWORDS (gold): 'how to stay connected as a family', 'meaningful family traditions', 'ways to connect with grandparents', 'family bonding activities', 'preserving family stories', 'family legacy ideas', 'reconnecting with family'. " +
+    "POSTING STRATEGY: 3–8 pins daily, mostly evergreen, heavy scheduling. Pinterest rewards CONSISTENCY and keyword richness — NOT viral spikes. " +
+    "CRITICAL RULE: Do not over-brand. No startup energy. No app screenshots. No software graphics. Content must feel editorial, emotional, save-worthy, and lifestyle-oriented. " +
+    "TOP METRICS: Saves (most important), monthly viewers, click-through rate to website. " +
+    "TONE: Aspirational, warm, practical. Emotionally resonant. Save-worthy framing. Discovery-oriented ('10 ways to...', 'The ultimate guide to...'). Never salesy.",
 
   youtube:
     "Platform: YouTube. Title max 100 chars — must create curiosity gap. Description needs timestamps, links, keywords in first 2 lines. Hook viewers in first 5 seconds of script. " +

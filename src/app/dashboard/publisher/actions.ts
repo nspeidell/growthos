@@ -192,6 +192,136 @@ export async function schedulePost(
   });
 }
 
+// ─── Pinterest Board Management ───
+
+/**
+ * The 12 Reunion Pinterest boards.
+ * Ordered by strategic priority.
+ * See PINTEREST_STRATEGY.md for full rationale.
+ */
+const REUNION_PINTEREST_BOARDS = [
+  {
+    name: "Questions to Ask Your Grandparents",
+    description:
+      "Conversation prompts, legacy questions, and storytelling starters to capture family history before it's lost. Save these questions and ask them this week.",
+  },
+  {
+    name: "Family Traditions Worth Keeping",
+    description:
+      "Holiday traditions, weekly rituals, birthday ideas, and generational activities that build family identity. The rituals that become the memories.",
+  },
+  {
+    name: "Family Connection Ideas",
+    description:
+      "Activities, games, discussion prompts, and family challenges to bring your people closer — whether you're in the same house or across the country.",
+  },
+  {
+    name: "Family Legacy Ideas",
+    description:
+      "Memory books, legacy letters, family values, storytelling, and ancestry ideas. Be the founder of your family's legacy.",
+  },
+  {
+    name: "Memory Keeping Without Feeling Cringe",
+    description:
+      "Authentic memory preservation — candid photos, real moments, family journals, and modern storytelling. Because the blurry photos become your favorites later.",
+  },
+  {
+    name: "Raising Connected Kids",
+    description:
+      "Family bonding, technology balance, traditions, and emotional intelligence for intentional parents raising kids who know who they are.",
+  },
+  {
+    name: "Family Dinner & Gathering Inspiration",
+    description:
+      "Family tables, gatherings, hospitality, and connection rituals. The best conversations start around a good meal.",
+  },
+  {
+    name: "Family Reunion Ideas",
+    description:
+      "Games, activities, planning guides, shirts, memory walls, and everything you need to bring the whole family together.",
+  },
+  {
+    name: "Cozy Family Life",
+    description:
+      "Warmth, togetherness, cozy home moments, and soft nostalgic imagery. The visual world of what family actually feels like.",
+  },
+  {
+    name: "The Digital Family Living Room",
+    description:
+      "Cinematic family moments, warm aesthetic imagery, and emotional togetherness. A gathering place for family connection inspiration.",
+  },
+  {
+    name: "Family Group Chat Humor",
+    description:
+      "Relatable family memes, funny family texts, generational humor, and the beautiful chaos of family group chats.",
+  },
+  {
+    name: "AI for Families",
+    description:
+      "Warm and human uses of technology that help families stay connected, resurface memories, and simplify life together.",
+  },
+] as const;
+
+/**
+ * Create all 12 Reunion Pinterest boards in one shot.
+ * Safe to re-run — Pinterest will return a 409 for boards that already exist,
+ * which we catch per-board and report as 'skipped'.
+ */
+export async function createReunionPinterestBoards(
+  connectedAccountId: string
+): Promise<ActionResult<{ created: string[]; skipped: string[]; failed: string[] }>> {
+  return safeAction(async () => {
+    const session = await requirePermission("publish:queue");
+    const { DB, ENCRYPTION_KEY } = getBindings();
+    const db = createDb(DB);
+
+    const account = await db
+      .select()
+      .from(connectedAccounts)
+      .where(
+        and(
+          eq(connectedAccounts.id, connectedAccountId),
+          eq(connectedAccounts.workspaceId, session.workspaceId),
+          eq(connectedAccounts.platform, "pinterest")
+        )
+      )
+      .get();
+
+    if (!account) throw new Error("Pinterest account not found");
+    if (account.accountStatus !== "active") {
+      throw new Error("Pinterest account is expired — please reconnect");
+    }
+
+    const accessToken = await decrypt(account.accessTokenEncrypted, ENCRYPTION_KEY);
+    const client = new PinterestClient(accessToken);
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const failed: string[] = [];
+
+    for (const board of REUNION_PINTEREST_BOARDS) {
+      try {
+        await client.createBoard({
+          name: board.name,
+          description: board.description,
+          privacy: "PUBLIC",
+        });
+        created.push(board.name);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // 409 = board name already exists — not a failure
+        if (msg.includes("409") || msg.toLowerCase().includes("already exists") || msg.toLowerCase().includes("conflict")) {
+          skipped.push(board.name);
+        } else {
+          failed.push(`${board.name}: ${msg}`);
+        }
+      }
+    }
+
+    return { created, skipped, failed };
+  });
+}
+
 // ─── Pinterest Board Picker ───
 
 /**

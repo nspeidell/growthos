@@ -31,6 +31,7 @@ import {
   approvePost,
   cancelPost,
   listPinterestBoards,
+  createReunionPinterestBoards,
   type ScheduledPostWithDetails,
 } from "./actions";
 import type { PinterestBoard } from "@/lib/publishers/pinterest";
@@ -117,6 +118,7 @@ export default function PublisherDashboard() {
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [notification, setNotification] = useState<string | null>(null);
+  const [creatingBoards, setCreatingBoards] = useState(false);
 
   // Check URL params for connection status
   useEffect(() => {
@@ -212,6 +214,42 @@ export default function PublisherDashboard() {
             className="text-brand-600 hover:text-brand-800"
           >
             ✕
+          </button>
+        </div>
+      )}
+
+      {/* Pinterest Setup Banner */}
+      {accounts.some((a) => a.platform === "pinterest" && a.accountStatus === "active") && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-red-900">📌 Pinterest connected</p>
+            <p className="text-xs text-red-700 mt-0.5">
+              Create all 12 Reunion strategy boards in one click — Family Traditions, Questions to Ask Your Grandparents, Family Legacy Ideas, and more.
+            </p>
+          </div>
+          <button
+            disabled={creatingBoards}
+            onClick={() => {
+              const pinterestAccount = accounts.find((a) => a.platform === "pinterest" && a.accountStatus === "active");
+              if (!pinterestAccount) return;
+              setCreatingBoards(true);
+              createReunionPinterestBoards(pinterestAccount.id).then((result) => {
+                setCreatingBoards(false);
+                if (result.success) {
+                  const { created, skipped } = result.data;
+                  const parts = [];
+                  if (created.length > 0) parts.push(`${created.length} boards created`);
+                  if (skipped.length > 0) parts.push(`${skipped.length} already existed`);
+                  setNotification(`✅ Pinterest boards ready! ${parts.join(", ")}.`);
+                } else {
+                  setNotification(`❌ Board creation failed: ${result.error}`);
+                }
+              });
+            }}
+            className="shrink-0 flex items-center gap-1.5 rounded-lg bg-red-700 px-3 py-2 text-xs font-medium text-white hover:bg-red-800 disabled:opacity-50"
+          >
+            {creatingBoards ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "📌"}
+            {creatingBoards ? "Creating boards…" : "Create All 12 Boards"}
           </button>
         </div>
       )}
