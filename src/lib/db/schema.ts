@@ -1859,3 +1859,172 @@ export type EngagementActionRow = typeof engagementActions.$inferSelect;
 export type NewEngagementAction = typeof engagementActions.$inferInsert;
 export type SignalAlertRow = typeof signalAlerts.$inferSelect;
 export type NewSignalAlert = typeof signalAlerts.$inferInsert;
+
+// ═══════════════════════════════════════════
+// Phase: JV Marketing & Referral Tracking
+// ═══════════════════════════════════════════
+
+// ─── PARTNERS ───
+export const partners = sqliteTable("partners", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  workspaceId: text("workspace_id").notNull(),
+  name: text("name").notNull(),
+  email: text("email"),
+  companyName: text("company_name"),
+  partnerType: text("partner_type", {
+    enum: ["influencer", "podcast", "creator", "affiliate", "family_org", "church", "community", "media"],
+  }).notNull().default("affiliate"),
+  status: text("status", { enum: ["active", "paused", "archived"] }).notNull().default("active"),
+  notes: text("notes"),
+  websiteUrl: text("website_url"),
+  socialHandle: text("social_handle"),
+  qualityScore: real("quality_score").default(0),
+  totalClicks: integer("total_clicks").default(0),
+  totalSignups: integer("total_signups").default(0),
+  totalRevenue: real("total_revenue").default(0),
+  payoutOwed: real("payout_owed").default(0),
+  payoutPaid: real("payout_paid").default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── PARTNER CAMPAIGNS ───
+export const partnerCampaigns = sqliteTable("partner_campaigns", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  workspaceId: text("workspace_id").notNull(),
+  partnerId: text("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  campaignName: text("campaign_name").notNull(),
+  campaignSlug: text("campaign_slug"),
+  landingPageUrl: text("landing_page_url").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  status: text("status", { enum: ["active", "paused", "expired"] }).notNull().default("active"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── TRACKING LINKS ───
+export const trackingLinks = sqliteTable("tracking_links", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  workspaceId: text("workspace_id").notNull(),
+  partnerId: text("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  campaignId: text("campaign_id").references(() => partnerCampaigns.id, { onDelete: "set null" }),
+  shortCode: text("short_code").notNull().unique(),
+  destinationUrl: text("destination_url").notNull(),
+  utmSource: text("utm_source"),
+  utmMedium: text("utm_medium"),
+  utmCampaign: text("utm_campaign"),
+  utmContent: text("utm_content"),
+  attributionWindowDays: integer("attribution_window_days").notNull().default(30),
+  clickCount: integer("click_count").default(0),
+  uniqueClickCount: integer("unique_click_count").default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── REFERRAL VISITS ───
+export const referralVisits = sqliteTable("referral_visits", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  trackingLinkId: text("tracking_link_id").notNull().references(() => trackingLinks.id, { onDelete: "cascade" }),
+  partnerId: text("partner_id").notNull(),
+  ipHash: text("ip_hash"),
+  userAgentHash: text("user_agent_hash"),
+  referrer: text("referrer"),
+  country: text("country"),
+  deviceType: text("device_type", { enum: ["desktop", "mobile", "tablet", "bot", "unknown"] }),
+  sessionId: text("session_id"),
+  isSuspicious: integer("is_suspicious", { mode: "boolean" }).default(false),
+  fraudReason: text("fraud_reason"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── ATTRIBUTED CONVERSIONS ───
+export const attributedConversions = sqliteTable("attributed_conversions", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  trackingLinkId: text("tracking_link_id").notNull().references(() => trackingLinks.id, { onDelete: "cascade" }),
+  partnerId: text("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id").notNull(),
+  conversionType: text("conversion_type", {
+    enum: ["signup", "subscription", "purchase", "family_invite", "family_activation"],
+  }).notNull().default("signup"),
+  conversionValue: real("conversion_value").default(0),
+  userId: text("user_id"),
+  attributionChain: text("attribution_chain"), // JSON
+  status: text("status", { enum: ["pending", "confirmed", "rejected"] }).notNull().default("pending"),
+  confirmationDays: integer("confirmation_days").default(14),
+  confirmedAt: integer("confirmed_at", { mode: "timestamp" }),
+  commissionAmount: real("commission_amount").default(0),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── COMMISSION RULES ───
+export const commissionRules = sqliteTable("commission_rules", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  workspaceId: text("workspace_id").notNull(),
+  partnerId: text("partner_id").references(() => partners.id, { onDelete: "cascade" }),
+  ruleType: text("rule_type", { enum: ["flat_fee", "percentage", "tiered"] }).notNull().default("flat_fee"),
+  value: real("value").notNull().default(0),
+  conversionType: text("conversion_type"),
+  milestones: text("milestones"), // JSON: [{min_conversions, bonus_amount}]
+  isActive: integer("is_active", { mode: "boolean" }).default(true),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── PARTNER PAYOUTS ───
+export const partnerPayouts = sqliteTable("partner_payouts", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  workspaceId: text("workspace_id").notNull(),
+  partnerId: text("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  amount: real("amount").notNull(),
+  payoutMethod: text("payout_method", { enum: ["paypal", "bank", "stripe", "check", "crypto", "other"] }),
+  payoutReference: text("payout_reference"),
+  status: text("status", { enum: ["pending", "paid", "failed"] }).notNull().default("pending"),
+  note: text("note"),
+  paidAt: integer("paid_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── PARTNER QUALITY SNAPSHOTS ───
+export const partnerQualitySnapshots = sqliteTable("partner_quality_snapshots", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  partnerId: text("partner_id").notNull().references(() => partners.id, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id").notNull(),
+  retentionScore: real("retention_score").default(0),
+  activationScore: real("activation_score").default(0),
+  referralScore: real("referral_score").default(0),
+  conversionRateScore: real("conversion_rate_score").default(0),
+  churnScore: real("churn_score").default(0),
+  qualityScore: real("quality_score").default(0),
+  signups30d: integer("signups_30d").default(0),
+  activeUsers30d: integer("active_users_30d").default(0),
+  snapshotAt: integer("snapshot_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── JV Relations ───
+export const partnersRelations = relations(partners, ({ many }) => ({
+  campaigns: many(partnerCampaigns),
+  trackingLinks: many(trackingLinks),
+  conversions: many(attributedConversions),
+  payouts: many(partnerPayouts),
+  qualitySnapshots: many(partnerQualitySnapshots),
+}));
+
+export const partnerCampaignsRelations = relations(partnerCampaigns, ({ one, many }) => ({
+  partner: one(partners, { fields: [partnerCampaigns.partnerId], references: [partners.id] }),
+  trackingLinks: many(trackingLinks),
+}));
+
+export const trackingLinksRelations = relations(trackingLinks, ({ one, many }) => ({
+  partner: one(partners, { fields: [trackingLinks.partnerId], references: [partners.id] }),
+  campaign: one(partnerCampaigns, { fields: [trackingLinks.campaignId], references: [partnerCampaigns.id] }),
+  visits: many(referralVisits),
+  conversions: many(attributedConversions),
+}));
+
+// ─── JV Type Exports ───
+export type Partner = typeof partners.$inferSelect;
+export type NewPartner = typeof partners.$inferInsert;
+export type PartnerCampaign = typeof partnerCampaigns.$inferSelect;
+export type TrackingLink = typeof trackingLinks.$inferSelect;
+export type ReferralVisit = typeof referralVisits.$inferSelect;
+export type AttributedConversion = typeof attributedConversions.$inferSelect;
+export type CommissionRule = typeof commissionRules.$inferSelect;
+export type PartnerPayout = typeof partnerPayouts.$inferSelect;
+export type PartnerQualitySnapshot = typeof partnerQualitySnapshots.$inferSelect;
