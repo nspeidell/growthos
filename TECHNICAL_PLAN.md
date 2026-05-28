@@ -1,7 +1,7 @@
 # GrowthOS — Technical Plan
 
-**Last updated:** May 19, 2026
-**Status:** Original 14 build phases complete. Now operating under revised council-reviewed architecture: 6 master phases + 3 cross-cutting systems. Autonomy is earned, not assumed.
+**Last updated:** May 28, 2026
+**Status:** Original 14 build phases complete + 3 new modules (Influencers, Pinterest, JV Marketing). Now operating under revised council-reviewed architecture: 6 master phases + 3 cross-cutting systems. Autonomy is earned, not assumed.
 
 ---
 
@@ -67,7 +67,7 @@ GrowthOS becomes **6 interconnected systems** plus **3 cross-cutting systems**:
                │ D1 / KV / R2 / Queue bindings
 ┌──────────────▼──────────────────────────────────────────────┐
 │  Cloudflare Infrastructure                                   │
-│  ├── D1 (growthos-prod)    SQLite — 24 migrations            │
+│  ├── D1 (growthos-prod)    SQLite — 27 migrations            │
 │  ├── R2 (growthos-media)   Object storage for media          │
 │  ├── KV (sessions + cache) Auth sessions, counters, state    │
 │  └── Queues                publish · media · swarm · signals │
@@ -90,8 +90,8 @@ External services:
   Meta Graph API       — Facebook / Instagram / Threads publishing
   X API v2             — X (Twitter) publishing
   LinkedIn API v2      — LinkedIn publishing
-  Reddit API           — Reddit signals + manual publishing (Reunion only)
-  Pinterest API v5     — Pinterest publishing (pending trial access)
+  Reddit API           — Reddit signals + manual publishing (Reunion only; brand posting manual by strategy)
+  Pinterest API v5     — Pinterest publishing (Trial access active ✅; PINTEREST_CLIENT_ID/SECRET set)
   Social Cat           — Influencer discovery (manual import, no API)
   Reunion API          — Internal family platform bridge
 ```
@@ -106,7 +106,7 @@ External services:
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Cloudflare Workers (modular) | ✅ | Publisher, automation-processor, token-refresher |
-| D1 schema (normalized) | ✅ | 24 migrations |
+| D1 schema (normalized) | ✅ | 27 migrations |
 | Queue system | ✅ | publish + media + swarm + signals queues |
 | KV store (state + OAuth + session) | ✅ | |
 | OAuth + Token Vault (AES-256-GCM) | ✅ | All platforms implemented |
@@ -174,9 +174,14 @@ CREATE INDEX idx_event_log_type ON event_log(type, created_at DESC);
 |-----------|--------|-------|
 | Queue-based publishing worker | ✅ | `growthos-publisher` Worker |
 | Platform adapters (X, LinkedIn, Instagram, Threads, Facebook) | ✅ | All 5 implemented |
+| Pinterest adapter (v5 API) | ✅ | `src/lib/publishers/pinterest.ts` — createPin, createBoard, listBoards, analytics |
+| Pinterest Board Picker | ✅ | Publisher dashboard shows boards by name; boardId injected into metadata |
+| Pinterest "Create All 12 Boards" | ✅ | One-click action creates Reunion's full 12-board content strategy |
+| Facebook Groups publishing | ✅ | Communities dashboard wired to real Graph API; `publish_to_groups` scope |
 | Scheduling system (`scheduled_posts` table) | ✅ | 1-minute cron resolution |
 | Retry + DLQ logic | ✅ | 3 retries, dead-letter queue |
 | Influencer distribution layer | ✅ | Influencer CRM + campaign management (migration 0024) |
+| JV Marketing / Partner Attribution | ✅ | 8-table schema, edge redirect, quality scoring (migration 0026) |
 | Failure classification (auth / rate limit / payload / outage) | ⚠️ | Error stored as text; **needs structured classification enum** |
 | Formal platform adapter interface | ❌ | **GAP** — implement `validate()`, `transform()`, `publish()`, `handleResponse()` interface formally |
 
@@ -188,10 +193,13 @@ CREATE INDEX idx_event_log_type ON event_log(type, created_at DESC);
 | Instagram | ~60 days | ig_refresh_token | ✅ |
 | Threads | ~60 days | th_refresh_token | ✅ |
 | LinkedIn | 60 days | OAuth 2.0 refresh | ✅ |
+| Pinterest | Long-lived | Manual re-auth | ✅ |
 
 **Phase 3 Exit Criteria:**
 - ✅ Reliable multi-platform publishing
 - ✅ Scheduling stable
+- ✅ Pinterest live (Trial access approved, secrets set)
+- ✅ Facebook Groups publishing live
 - ⚠️ Failures classified (text errors exist; structured enum pending)
 
 ---
@@ -406,7 +414,7 @@ The original 14-phase build maps to the council-reviewed 6-phase framework as fo
 
 **Database:** Cloudflare D1 (SQLite) · **ORM:** Drizzle (SQLite dialect)
 **Schema file:** `src/lib/db/schema.ts`
-**Migrations:** `src/lib/db/migrations/` — 24 files (0000–0024)
+**Migrations:** `src/lib/db/migrations/` — 27 files (0000–0026)
 
 ### Critical rules
 - Every schema change requires **both** a new migration SQL file AND a matching update to `schema.ts`
@@ -657,13 +665,108 @@ The original 14-phase build maps to the council-reviewed 6-phase framework as fo
 
 ---
 
+### Event Log (migration 0025) ✅ COMPLETE
+
+**event_log** — unified event schema for full system observability
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | |
+| workspace_id | TEXT | |
+| trace_id | TEXT | cross-service correlation |
+| type | TEXT | signal.detected \| content.generated \| post.scheduled \| post.published \| error |
+| source | TEXT | reddit \| x \| linkedin \| system \| user |
+| actor_id | TEXT | user_id if human-initiated |
+| resource_type | TEXT | post \| signal \| campaign \| automation |
+| resource_id | TEXT | |
+| payload | TEXT (JSON) | |
+| severity | TEXT | info \| warn \| error \| critical |
+| created_at | INTEGER | unixepoch() |
+
+---
+
+### JV Marketing & Referral Tracking (migration 0026) ✅ COMPLETE
+
+**partners** — Partner CRM with denormalized aggregate stats
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | cuid2 |
+| workspace_id | TEXT | |
+| name, email, company_name | TEXT | |
+| partner_type | TEXT | influencer \| podcast \| creator \| affiliate \| family_org \| church \| community \| media |
+| status | TEXT | active \| paused \| archived |
+| quality_score | REAL | 0–100, denormalized composite |
+| total_clicks, total_signups | INTEGER | lifetime denormalized totals |
+| total_revenue, payout_owed, payout_paid | REAL | USD |
+
+**partner_campaigns** — Campaign groupings per partner with optional expiry
+
+**tracking_links** — 8-char alphanumeric short codes (`/r/[code]`) with UTM params and attribution window
+| Column | Type | Notes |
+|--------|------|-------|
+| short_code | TEXT UNIQUE | 8-char alphanumeric, globally unique |
+| destination_url | TEXT | |
+| utm_source/medium/campaign/content | TEXT | injected on redirect |
+| attribution_window_days | INTEGER | default 30 |
+| click_count, unique_click_count | INTEGER | |
+
+**referral_visits** — Privacy-safe click log
+| Column | Type | Notes |
+|--------|------|-------|
+| ip_hash | TEXT | SHA-256 salted with workspace_id |
+| user_agent_hash | TEXT | SHA-256 salted |
+| device_type | TEXT | desktop \| mobile \| tablet \| bot \| unknown |
+| is_suspicious | BOOLEAN | rapid-click fraud flag (same IP within 60s) |
+| fraud_reason | TEXT | `rapid_click` or null |
+
+**attributed_conversions** — Conversion events with multi-touch attribution chain
+| Column | Type | Notes |
+|--------|------|-------|
+| conversion_type | TEXT | signup \| subscription \| purchase \| family_invite \| family_activation |
+| conversion_value | REAL | USD |
+| attribution_chain | TEXT (JSON) | `[{source, tracking_link_id, timestamp}]` first + last touch |
+| status | TEXT | pending \| confirmed \| rejected |
+| commission_amount | REAL | computed from commission_rules |
+
+**commission_rules** — Flat fee / percentage / tiered commission configs per partner or workspace default
+
+**partner_payouts** — Payout lifecycle (pending → paid)
+
+**partner_quality_snapshots** — Periodic snapshots of the 5-factor quality score for trend analysis
+
+**Quality Score Formula:**
+```
+quality_score =
+  retention_score       × 0.30   // 30-day user retention from this partner
+  + activation_score    × 0.25   // Avg family members activated per signup (target: 3)
+  + referral_score      × 0.20   // Downstream referral propagation (target: 1 per signup)
+  + conversion_rate_score × 0.15 // Click-to-signup rate (target: 5%)
+  + churn_score         × 0.10   // Inverse churn (confirmed / total signups)
+```
+
+**Edge redirect route:** `src/app/r/[code]/route.ts` — runs at Cloudflare edge
+- Lookup → fraud check → log visit → increment counters → set `gos_attr` cookie → 301
+
+**Attribution cookie (`gos_attr`):**
+```json
+{
+  "partner_id": "...",
+  "tracking_link_id": "...",
+  "workspace_id": "...",
+  "session_id": "...",
+  "timestamp": 1234567890000,
+  "first_touch": { "partner_id": "...", "tracking_link_id": "...", "timestamp": ... }
+}
+```
+Cookie TTL = `attribution_window_days` (default 30). First-touch preserved across last-touch overwrites.
+
+---
+
 ### Pending Migrations
 
 | Migration | Purpose | Phase |
 |-----------|---------|-------|
-| 0025 | `event_log` — unified event schema with `trace_id` | Phase 1 gap |
-| 0026 | `workspace_limits` — budget engine hard caps | Phase 5 |
 | 0027 | `kill_switches` — global + scoped pause controls | Phase 5 / Cross-cutting |
+| 0028 | `workspace_limits` — budget engine hard caps | Phase 5 |
 
 ---
 
@@ -713,7 +816,8 @@ The original 14-phase build maps to the council-reviewed 6-phase framework as fo
 | `/api/social/deauth/[platform]` | POST/GET | Meta deauth callback |
 | `/api/social/delete/[platform]` | POST | Meta data deletion callback |
 | `/api/webhooks/stripe` | POST | Stripe billing webhooks |
-| `/api/webhooks/reunion` | POST | Reunion API webhooks |
+| `/api/webhooks/reunion` | POST | Reunion API webhooks — call `recordConversion()` here with `gos_attr` cookie |
+| `/r/[code]` | GET | **Edge** attribution redirect — fraud check, visit log, cookie set, 301 |
 
 ### Auth-gated API routes
 | Route | Method | Purpose |
@@ -752,6 +856,9 @@ The original 14-phase build maps to the council-reviewed 6-phase framework as fo
 | experiments | `createExperiment`, `recordEvent`, `computeResults`, `promoteWinner` |
 | swarm | `launchMission`, `getMissionStatus`, `listAgents` |
 | influencers | `listInfluencers`, `addInfluencer`, `createCampaign`, `logInfluencerContent`, `getInfluencerStats` |
+| publisher | `listPinterestBoards`, `createReunionPinterestBoards`, `schedulePost`, `approvePost`, `cancelPost` |
+| communities | `createCommunity`, `publishCommunityPost`, `listConnectedAccountsByPlatform` |
+| jv | `listPartners`, `createPartner`, `createTrackingLink`, `getPartnerAnalytics`, `getWorkspaceJvSummary`, `computePartnerQualityScore`, `createCommissionRule`, `createPayout`, `markPayoutPaid`, `recordConversion` |
 | team | `inviteMember`, `updateMemberRole`, `removeMember` |
 | billing | `createCheckoutSession`, `createPortalSession`, `getSubscription` |
 
@@ -877,31 +984,31 @@ growthos-automation-processor Worker (every minute)
 ## 12. Known Gaps & Next Build Targets
 
 ### Critical (Phase 5 blockers — system is unsafe for autonomous mode without these)
-| Item | Description | Migration |
-|------|-------------|-----------|
-| `event_log` table | Unified event schema with trace_id — backbone of Observability | 0025 |
-| Risk Engine | Per-action risk scoring gates Swarm execution | — |
-| Budget Engine | Hard limits on posts/day, API calls/platform, outreach caps | 0026 |
-| Kill Switches | Global + scoped pause controls, rollback | 0027 |
+| Item | Description | Migration | Status |
+|------|-------------|-----------|--------|
+| Risk Engine | Per-action risk scoring gates Swarm execution | — | ❌ Not built |
+| Budget Engine | Hard limits on posts/day, API calls/platform, outreach caps | 0028 | ❌ Not built |
+| Kill Switches | Global + scoped pause controls, rollback | 0027 | ❌ Not built |
 
 ### Important (Phase 2–3 quality gaps)
-| Item | Description |
-|------|-------------|
-| Performance Feedback Injection | Past performance embeddings + CTR signals fed back into content generation prompts |
-| Content versioning | `variant_id` + `prompt_hash` columns on `content_assets` |
-| Platform adapter interface | Formalize `validate/transform/publish/handleResponse` contract |
-| Failure classification enum | Structured `failure_type` column on `scheduled_posts` instead of free-text error |
-| Threads publishing | Blocked by Meta app review / tester access required |
-| Identity & Trust Layer | Human-like posting patterns, cadence variance, jitter |
+| Item | Description | Status |
+|------|-------------|--------|
+| JV Conversion wiring | `recordConversion()` in `/api/webhooks/reunion` needs to pass `gos_attr` cookie from Reunion signup flow | ❌ Pending |
+| Performance Feedback Injection | Past performance embeddings + CTR signals fed back into content generation prompts | ❌ Not built |
+| Content versioning | `variant_id` + `prompt_hash` columns on `content_assets` | ❌ Not built |
+| Platform adapter interface | Formalize `validate/transform/publish/handleResponse` contract | ❌ Not built |
+| Failure classification enum | Structured `failure_type` column on `scheduled_posts` instead of free-text error | ❌ Not built |
+| Threads publishing | Blocked by Meta app review / tester access required | ❌ External blocker |
+| Identity & Trust Layer | Human-like posting patterns, cadence variance, jitter | ❌ Not built |
+| Pinterest OAuth flow | Full OAuth callback for connecting Pinterest accounts (currently manual token) | ❌ Not built |
 
 ### Pending external dependencies
-| Item | Blocker | Action |
+| Item | Blocker | Status |
 |------|---------|--------|
-| Reddit publishing (Reunion) | API access resubmitted | Add secrets when approved |
-| Pinterest publishing | Trial access pending | Add `PINTEREST_CLIENT_SECRET` when available |
-| TikTok publishing | App review + demo video required | — |
-| Creatomate video | Template IDs not created | Build templates in Creatomate dashboard |
-| Token refresher Worker | Secrets not yet set | Set ENCRYPTION_KEY + platform secrets via wrangler |
+| Reddit publishing (Reunion) | API access resubmitted | ❌ Awaiting approval |
+| Pinterest publishing | ✅ Trial access approved; secrets set | ✅ Live |
+| TikTok publishing | App review + demo video required | ❌ Not started |
+| Creatomate video | Template IDs not created | ❌ Build templates in Creatomate dashboard |
 
 ### Technical debt
 | Item | Risk | Notes |
@@ -912,3 +1019,5 @@ growthos-automation-processor Worker (every minute)
 | Swarm: no guardrails | **High** | Swarm is fully coded and can run missions, but without Risk Engine it operates unconstrained — do not enable autonomous mode until Phase 5 guardrails are built |
 | Social Listening: untested vs live data | Medium | Needs a live signal scan run to validate |
 | Mobile real-device testing | Medium | Design is mobile-first; no real-device testing done |
+| JV Quality Score: no live data yet | Low | Score computation works but needs real Reunion signups attributed to partners to produce meaningful scores |
+| Pinterest: long-lived token only | Low | No automatic token refresh for Pinterest — will need manual reconnect when token expires; OAuth flow not yet built |
