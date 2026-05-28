@@ -609,7 +609,7 @@ export default function JvDashboard() {
 
   // Auto-select first partner for analytics
   useEffect(() => {
-    if (partners.length > 0 && !selectedPartnerId) {
+    if (partners.length > 0 && !selectedPartnerId && partners[0]) {
       setSelectedPartnerId(partners[0].id);
     }
   }, [partners, selectedPartnerId]);
