@@ -129,9 +129,9 @@ interface RecentClickRow {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { code: string } }
+  { params }: { params: Promise<{ code: string }> }
 ) {
-  const { code } = params;
+  const { code } = await params;
   const env = getBindings();
   const db = env.DB;
 

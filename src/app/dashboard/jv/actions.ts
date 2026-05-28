@@ -468,8 +468,8 @@ export interface PartnerAnalyticsSummary {
     id: string;
     shortCode: string;
     destinationUrl: string;
-    clickCount: number;
-    uniqueClickCount: number;
+    clickCount: number | null;
+    uniqueClickCount: number | null;
   }>;
 }
 

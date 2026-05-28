@@ -510,7 +510,7 @@ function AnalyticsPanel({ partner }: { partner: Partner }) {
                 <span className="font-mono text-primary text-xs">/{link.shortCode}</span>
                 <span className="text-xs text-muted-foreground truncate mx-3 flex-1">{link.destinationUrl}</span>
                 <span className="text-xs font-medium tabular-nums">
-                  {fmt(link.clickCount)} <span className="text-muted-foreground font-normal">clicks</span>
+                  {fmt(link.clickCount ?? 0)} <span className="text-muted-foreground font-normal">clicks</span>
                 </span>
               </div>
             ))}
