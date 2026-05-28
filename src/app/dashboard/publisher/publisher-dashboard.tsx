@@ -553,7 +553,7 @@ function ContentLibrary({ accounts, onScheduled }: { accounts: ConnectedAccount[
     listPinterestBoards(selectedAccountId).then((result) => {
       if (result.success && result.data) {
         setPinterestBoards(result.data);
-        if (result.data.length > 0) setSelectedBoardId(result.data[0].id);
+        if (result.data.length > 0 && result.data[0]) setSelectedBoardId(result.data[0].id);
       }
       setLoadingBoards(false);
     });
