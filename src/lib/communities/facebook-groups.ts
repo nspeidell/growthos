@@ -44,11 +44,63 @@ export interface CreatePollOptions {
   accessToken: string;
 }
 
+export interface FacebookPage {
+  id: string;
+  name: string;
+  access_token: string;
+  category?: string;
+}
+
 export class FacebookGroupsClient {
   private accessToken: string;
 
   constructor(accessToken: string) {
     this.accessToken = accessToken;
+  }
+
+  /**
+   * Get Facebook Pages managed by this user token.
+   * Each Page comes with its own Page Access Token which can post to
+   * groups the Page is a member of — without needing publish_to_groups.
+   */
+  async getManagedPages(): Promise<FacebookPage[]> {
+    const response = await fetch(
+      `${GRAPH_API_BASE}/me/accounts?fields=id,name,access_token,category&access_token=${this.accessToken}`
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to fetch managed pages: ${error}`);
+    }
+
+    const data = (await response.json()) as { data: FacebookPage[] };
+    return data.data ?? [];
+  }
+
+  /**
+   * Find the best Page token to use for posting to a group.
+   * Prefers a page whose name contains the hint (e.g. "Reunion").
+   * Falls back to the first page if no name match found.
+   */
+  async getPageTokenForGroup(nameHint?: string): Promise<string> {
+    const pages = await this.getManagedPages();
+    if (pages.length === 0) {
+      throw new Error(
+        "No Facebook Pages found on this account. " +
+        "The Reunion Page must be managed by the connected Facebook account."
+      );
+    }
+
+    // Try to find by name hint
+    if (nameHint) {
+      const match = pages.find(p =>
+        p.name.toLowerCase().includes(nameHint.toLowerCase())
+      );
+      if (match) return match.access_token;
+    }
+
+    // Fall back to first page
+    return pages[0]!.access_token;
   }
 
   /**

@@ -264,14 +264,26 @@ export async function publishCommunityPost(
 
       const client = new FacebookGroupsClient(accessToken);
 
+      // Facebook no longer allows plain user tokens to post to groups.
+      // The correct approach: use the Page's own access token.
+      // Pages that are members of a group can post to it with pages_manage_posts.
+      let postingToken = accessToken;
+      try {
+        postingToken = await client.getPageTokenForGroup("Reunion");
+      } catch {
+        // No managed pages found — fall through to user token.
+        // Graph API will surface the real permission error if it fails.
+      }
+
+      const pageClient = new FacebookGroupsClient(postingToken);
       const message = post.title
         ? `${post.title}\n\n${post.body}`
         : post.body;
 
-      platformPostId = await client.postToGroup({
+      platformPostId = await pageClient.postToGroup({
         groupId: community.platformId,
         message,
-        accessToken,
+        accessToken: postingToken,
       });
     }
 
