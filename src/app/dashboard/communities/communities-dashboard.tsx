@@ -552,13 +552,42 @@ export default function CommunitiesDashboard() {
                               </p>
                             </div>
                             {post.postStatus === "draft" && (
-                              <button
-                                onClick={() => handlePublish(post.id)}
-                                disabled={isPending}
-                                className="inline-flex items-center gap-1 rounded-lg bg-success px-2.5 py-1 text-xs font-medium text-success-foreground hover:bg-success/90 disabled:opacity-50 shrink-0"
-                              >
-                                <Send className="w-3 h-3" /> Publish
-                              </button>
+                              <div className="flex flex-col gap-1.5 shrink-0">
+                                {selected.platform === "facebook" && selected.platformId ? (
+                                  <>
+                                    <button
+                                      onClick={async () => {
+                                        const text = post.title
+                                          ? `${post.title}\n\n${post.body}`
+                                          : post.body;
+                                        await navigator.clipboard.writeText(text);
+                                        window.open(
+                                          `https://www.facebook.com/groups/${selected.platformId}`,
+                                          "_blank"
+                                        );
+                                      }}
+                                      className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 shrink-0"
+                                    >
+                                      <ExternalLink className="w-3 h-3" /> Copy & Open Group
+                                    </button>
+                                    <button
+                                      onClick={() => handlePublish(post.id)}
+                                      disabled={isPending}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                                    >
+                                      <CheckCircle2 className="w-3 h-3" /> Mark Posted
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => handlePublish(post.id)}
+                                    disabled={isPending}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-success px-2.5 py-1 text-xs font-medium text-success-foreground hover:bg-success/90 disabled:opacity-50 shrink-0"
+                                  >
+                                    <Send className="w-3 h-3" /> Publish
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                           {(post.likes ?? 0) > 0 || (post.comments ?? 0) > 0 ? (

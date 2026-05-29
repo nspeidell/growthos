@@ -235,56 +235,13 @@ export async function publishCommunityPost(
     let platformPostId: string | undefined;
 
     // ── Facebook Group publishing ──
-    if (community.platform === "facebook" && community.platformId) {
-      if (!community.connectedAccountId) {
-        throw new Error(
-          "No Facebook account linked to this community. Edit the community and select a connected account."
-        );
-      }
-
-      const account = await db
-        .select()
-        .from(connectedAccounts)
-        .where(
-          and(
-            eq(connectedAccounts.id, community.connectedAccountId),
-            eq(connectedAccounts.workspaceId, session.workspaceId)
-          )
-        )
-        .get();
-
-      if (!account) throw new Error("Connected Facebook account not found");
-      if (account.accountStatus !== "active")
-        throw new Error("Facebook account token is expired. Please reconnect.");
-
-      const accessToken = await decrypt(
-        account.accessTokenEncrypted,
-        ENCRYPTION_KEY
-      );
-
-      const client = new FacebookGroupsClient(accessToken);
-
-      // Facebook no longer allows plain user tokens to post to groups.
-      // The correct approach: use the Page's own access token.
-      // Pages that are members of a group can post to it with pages_manage_posts.
-      let postingToken = accessToken;
-      try {
-        postingToken = await client.getPageTokenForGroup("Reunion");
-      } catch {
-        // No managed pages found — fall through to user token.
-        // Graph API will surface the real permission error if it fails.
-      }
-
-      const pageClient = new FacebookGroupsClient(postingToken);
-      const message = post.title
-        ? `${post.title}\n\n${post.body}`
-        : post.body;
-
-      platformPostId = await pageClient.postToGroup({
-        groupId: community.platformId,
-        message,
-        accessToken: postingToken,
-      });
+    // Meta's Groups API requires app review for publish_to_groups.
+    // Until approved, posting is manual: the dashboard's "Copy & Open Group"
+    // button handles content delivery. "Mark Posted" calls this action to
+    // record the post as published in GrowthOS for tracking purposes.
+    if (community.platform === "facebook") {
+      // Nothing to call — just fall through to mark as published below.
+      platformPostId = undefined;
     }
 
     // ── Reddit (read-only strategy — log but don't publish via API) ──
