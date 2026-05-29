@@ -238,7 +238,7 @@ Format: TITLE: [short title]
       id: createId(),
       communityId: campaign.communityId,
       workspaceId: session.workspaceId,
-      postType: "update",
+      postType: "text",
       title,
       body,
       postStatus: "draft",
