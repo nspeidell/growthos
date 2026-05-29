@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useCallback } from "react";
 import {
   ImagePlus,
   Video,
@@ -10,9 +10,21 @@ import {
   Mic,
   Palette,
   Sparkles,
+  Wand2,
+  Play,
+  Download,
+  Send,
+  RefreshCw,
+  ChevronRight,
 } from "lucide-react";
 import { createMediaJob, listMediaJobs } from "./actions";
 import { listVoiceProfiles } from "./voice-actions";
+import {
+  REUNION_VOICE_PRESETS,
+  generateVideoScript,
+  createVoiceoverVideoJob,
+  listMediaJobs as listVideoJobs,
+} from "./video-studio-actions";
 import type { MediaJob } from "@/lib/db/schema";
 
 const IMAGE_TYPES = [
@@ -55,9 +67,10 @@ interface VoiceProfile {
 }
 
 type TabType = "image" | "video";
+type VideoStep = 1 | 2 | 3;
 
 export function MediaStudio() {
-  const [activeTab, setActiveTab] = useState<TabType>("image");
+  const [activeTab, setActiveTab] = useState<TabType>("video");
   const [isPending, startTransition] = useTransition();
 
   // Image state
@@ -65,11 +78,18 @@ export function MediaStudio() {
   const [prompt, setPrompt] = useState("");
   const [provider, setProvider] = useState("replicate");
 
-  // Video state
-  const [script, setScript] = useState("");
-  const [voiceProfileId, setVoiceProfileId] = useState("");
-  const [emotionalVibe, setEmotionalVibe] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // Video Studio state — 3-step wizard
+  const [videoStep, setVideoStep] = useState<VideoStep>(1);
+  const [videoTopic, setVideoTopic] = useState("");
+  const [videoScript, setVideoScript] = useState("");
+  const [videoTitle, setVideoTitle] = useState("");
+  const [videoImagePrompts, setVideoImagePrompts] = useState<string[]>([]);
+  const [selectedVoiceId, setSelectedVoiceId] = useState(REUNION_VOICE_PRESETS[0]!.id);
+  const [selectedVoiceName, setSelectedVoiceName] = useState(REUNION_VOICE_PRESETS[0]!.name);
+  const [videoFormat, setVideoFormat] = useState<"vertical" | "square" | "horizontal">("vertical");
+  const [contentPillar, setContentPillar] = useState("family_connection");
+  const [generatingScript, setGeneratingScript] = useState(false);
+  const [videoJobs, setVideoJobs] = useState<MediaJob[]>([]);
 
   // Shared
   const [status, setStatus] = useState<"idle" | "submitting" | "queued" | "error">("idle");
@@ -77,18 +97,26 @@ export function MediaStudio() {
   const [recentJobs, setRecentJobs] = useState<MediaJob[]>([]);
   const [voiceProfiles, setVoiceProfiles] = useState<VoiceProfile[]>([]);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    const [jobsResult, voicesResult] = await Promise.all([
+  const loadData = useCallback(async () => {
+    const [jobsResult, voicesResult, videoJobsResult] = await Promise.all([
       listMediaJobs(),
       listVoiceProfiles(),
+      listVideoJobs("video_composite"),
     ]);
-    if (jobsResult.success && jobsResult.data) setRecentJobs(jobsResult.data.slice(0, 10));
-    if (voicesResult.success && voicesResult.data) setVoiceProfiles(voicesResult.data);
-  }
+    if (jobsResult.success) setRecentJobs(jobsResult.data.slice(0, 10));
+    if (voicesResult.success) setVoiceProfiles(voicesResult.data);
+    if (videoJobsResult.success) setVideoJobs(videoJobsResult.data);
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Poll in-progress video jobs every 10s
+  useEffect(() => {
+    const hasActive = videoJobs.some(j => j.status === "queued" || j.status === "processing");
+    if (!hasActive) return;
+    const interval = setInterval(() => loadData(), 10_000);
+    return () => clearInterval(interval);
+  }, [videoJobs, loadData]);
 
   function handleImageSubmit() {
     if (!mediaType || !prompt) {
@@ -120,40 +148,55 @@ export function MediaStudio() {
     });
   }
 
+  function handleAIGenerateScript() {
+    if (!videoTopic.trim()) { setError("Enter a topic first."); return; }
+    setError("");
+    setGeneratingScript(true);
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("topic", videoTopic);
+      fd.set("format", videoFormat);
+      fd.set("contentPillar", contentPillar);
+      fd.set("targetDurationSeconds", "45");
+      const result = await generateVideoScript(fd);
+      if (result.success) {
+        setVideoScript(result.data.script);
+        setVideoTitle(result.data.title);
+        setVideoImagePrompts(result.data.imagePrompts);
+        setVideoStep(2);
+      } else {
+        setError(result.error ?? "Script generation failed");
+      }
+      setGeneratingScript(false);
+    });
+  }
+
   function handleVideoSubmit() {
-    if (!script.trim()) {
-      setError("Write a narration script for the video.");
-      return;
-    }
+    if (!videoScript.trim()) { setError("Script is required."); return; }
+    if (!selectedVoiceId) { setError("Select a voice."); return; }
     setError("");
     setStatus("submitting");
 
-    const formData = new FormData();
-    formData.set("type", "video_composite");
-    formData.set("prompt", script);
-    formData.set("provider", "elevenlabs");
-    if (voiceProfileId) formData.set("voiceProfileId", voiceProfileId);
-    formData.set(
-      "config",
-      JSON.stringify({
-        script,
-        emotionalVibe: emotionalVibe || undefined,
-        subjectTags: selectedTags.length > 0 ? selectedTags : undefined,
-      })
-    );
+    const fd = new FormData();
+    fd.set("script", videoScript);
+    fd.set("voiceId", selectedVoiceId);
+    fd.set("voiceName", selectedVoiceName);
+    fd.set("format", videoFormat);
+    fd.set("title", videoTitle || videoTopic);
+    fd.set("imagePrompts", JSON.stringify(videoImagePrompts));
 
     startTransition(async () => {
-      const result = await createMediaJob(formData);
+      const result = await createVoiceoverVideoJob(fd);
       if (!result.success) {
-        setError(result.error ?? "Failed");
+        setError(result.error ?? "Failed to queue video");
         setStatus("error");
       } else {
         setStatus("queued");
-        setTimeout(() => {
-          setStatus("idle");
-          setScript("");
-          loadData();
-        }, 2500);
+        setVideoStep(1);
+        setVideoTopic("");
+        setVideoScript("");
+        setVideoTitle("");
+        setTimeout(() => { setStatus("idle"); loadData(); }, 3000);
       }
     });
   }
@@ -267,118 +310,219 @@ export function MediaStudio() {
         </div>
       )}
 
-      {/* ─── Video Composite Tab ─── */}
+      {/* ─── Video Studio Tab ─── */}
       {activeTab === "video" && (
         <div className="space-y-5">
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-semibold text-foreground">High-Realism Video</h3>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Layered composition: B-roll background + cloned voice narration + branded subtitles.
-              Output is a render manifest for your video pipeline.
-            </p>
+
+          {/* Step progress */}
+          <div className="flex items-center gap-2">
+            {([1, 2, 3] as VideoStep[]).map((s, i) => (
+              <div key={s} className="flex items-center gap-2">
+                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors ${
+                  videoStep === s ? "bg-primary text-primary-foreground"
+                  : videoStep > s ? "bg-primary/20 text-primary"
+                  : "bg-muted text-muted-foreground"
+                }`}>{s}</div>
+                <span className={`text-xs font-medium ${videoStep === s ? "text-foreground" : "text-muted-foreground"}`}>
+                  {s === 1 ? "Script" : s === 2 ? "Voice" : "Generate"}
+                </span>
+                {i < 2 && <ChevronRight className="w-3 h-3 text-muted-foreground" />}
+              </div>
+            ))}
           </div>
 
-          {/* Voice Profile */}
-          <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-foreground">
-              <Mic className="w-3.5 h-3.5" /> Voice Profile
-            </label>
-            <select
-              value={voiceProfileId}
-              onChange={(e) => setVoiceProfileId(e.target.value)}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:ring-1 focus:ring-ring"
-            >
-              <option value="">Auto (Founder Voice)</option>
-              {voiceProfiles.map((vp) => (
-                <option key={vp.id} value={vp.id}>
-                  {vp.name} {vp.isFounderVoice ? "(Founder)" : ""}
-                </option>
-              ))}
-            </select>
-            {voiceProfiles.length === 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                No voice profiles yet. Add one in Settings → Voices.
-              </p>
-            )}
-          </div>
+          {/* ── Step 1: Script ── */}
+          {videoStep === 1 && (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Format</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: "vertical", label: "Reel", sub: "9:16 · Instagram / Facebook" },
+                    { value: "square", label: "Square", sub: "1:1 · Feed / Stories" },
+                    { value: "horizontal", label: "Horizontal", sub: "16:9 · LinkedIn" },
+                  ].map(f => (
+                    <button key={f.value} onClick={() => setVideoFormat(f.value as typeof videoFormat)}
+                      className={`rounded-lg border p-3 text-left transition-colors ${videoFormat === f.value ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border bg-card hover:border-primary/40"}`}>
+                      <p className="text-sm font-semibold">{f.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{f.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Emotional Vibe */}
-          <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-foreground">
-              <Palette className="w-3.5 h-3.5" /> Emotional Vibe
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {EMOTIONAL_VIBES.map((vibe) => (
-                <button
-                  key={vibe}
-                  onClick={() => setEmotionalVibe(emotionalVibe === vibe ? "" : vibe)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors capitalize ${
-                    emotionalVibe === vibe
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {vibe}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Content Pillar</label>
+                <select value={contentPillar} onChange={e => setContentPillar(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                  <option value="family_connection">Family Connection & Activities</option>
+                  <option value="legacy_memory">Legacy & Memory Keeping</option>
+                  <option value="current_events">Current Events (Family Lens)</option>
+                  <option value="engagement">Community Engagement</option>
+                  <option value="humor">Family Humor</option>
+                  <option value="product_awareness">Reunion App Awareness</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Topic / Idea</label>
+                <input value={videoTopic} onChange={e => setVideoTopic(e.target.value)}
+                  placeholder="e.g. 5 questions to ask your grandparents before it's too late"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={handleAIGenerateScript} disabled={isPending || generatingScript || !videoTopic.trim()}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+                  {generatingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                  {generatingScript ? "Writing script…" : "AI Write Script"}
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Subject Tags */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground">B-Roll Subject Tags</label>
-            <div className="flex flex-wrap gap-2">
-              {SUBJECT_TAGS.map((tag) => (
-                <button
-                  key={tag}
-                  onClick={() =>
-                    setSelectedTags((prev) =>
-                      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-                    )
-                  }
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors capitalize ${
-                    selectedTags.includes(tag)
-                      ? "bg-accent text-accent-foreground"
-                      : "bg-muted text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {tag}
+                <button onClick={() => { setVideoScript(""); setVideoStep(2); }}
+                  className="rounded-lg border border-border px-4 py-2.5 text-sm hover:bg-muted">
+                  Write My Own
                 </button>
-              ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Script */}
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-foreground">
-              Narration Script
-            </label>
-            <textarea
-              value={script}
-              onChange={(e) => setScript(e.target.value)}
-              rows={6}
-              placeholder="Write the narration for the video. This will be spoken by the cloned voice and displayed as subtitles..."
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono focus:border-ring focus:ring-1 focus:ring-ring"
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
-              {script.length} chars · ~{Math.ceil(script.split(/\s+/).filter(Boolean).length / 150)} min
-            </p>
-          </div>
+          {/* ── Step 2: Script Review + Voice ── */}
+          {videoStep === 2 && (
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium text-muted-foreground">Script</label>
+                  <span className="text-xs text-muted-foreground">
+                    ~{Math.ceil(videoScript.split(/\s+/).filter(Boolean).length / 130 * 60)}s
+                  </span>
+                </div>
+                <textarea value={videoScript} onChange={e => setVideoScript(e.target.value)} rows={7}
+                  placeholder="Write or paste your video narration here…"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+              </div>
 
-          <button
-            onClick={handleVideoSubmit}
-            disabled={isPending}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {isPending ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Generating...</>
-            ) : (
-              <><Video className="h-4 w-4" /> Generate Video Composite</>
-            )}
-          </button>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-2">
+                  <Mic className="w-3 h-3 inline mr-1" /> Choose Voice
+                </label>
+                <div className="space-y-2">
+                  {REUNION_VOICE_PRESETS.map(voice => (
+                    <button key={voice.id}
+                      onClick={() => { setSelectedVoiceId(voice.id); setSelectedVoiceName(voice.name); }}
+                      className={`w-full rounded-lg border p-3 text-left flex items-start justify-between transition-colors ${selectedVoiceId === voice.id ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border bg-card hover:border-primary/40"}`}>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">{voice.name}</span>
+                          {voice.recommended && <span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 text-xs font-medium">Recommended</span>}
+                          <span className="text-xs text-muted-foreground capitalize">{voice.gender}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{voice.description}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={() => setVideoStep(1)} className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted">
+                  Back
+                </button>
+                <button onClick={() => setVideoStep(3)} disabled={!videoScript.trim() || !selectedVoiceId}
+                  className="flex-1 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+                  Next → Review & Generate
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 3: Review & Submit ── */}
+          {videoStep === 3 && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+                <h3 className="text-sm font-semibold">Review</h3>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-xs text-muted-foreground">Format</p>
+                    <p className="text-sm font-semibold mt-1 capitalize">{videoFormat}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-xs text-muted-foreground">Voice</p>
+                    <p className="text-sm font-semibold mt-1">{selectedVoiceName}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-xs text-muted-foreground">Duration</p>
+                    <p className="text-sm font-semibold mt-1">~{Math.ceil(videoScript.split(/\s+/).filter(Boolean).length / 130 * 60)}s</p>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground mb-1">Script preview</p>
+                  <p className="text-xs line-clamp-3">{videoScript}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-[#E2AC54]/30 bg-[#E2AC54]/5 p-4">
+                <p className="text-xs text-muted-foreground">
+                  <strong className="text-foreground">What happens next:</strong> GrowthOS generates the voiceover via ElevenLabs, creates branded background visuals, then sends everything to Creatomate for rendering. The finished MP4 (with animated captions + Reunion branding) appears in your media library below when ready — usually 2–5 minutes.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={() => setVideoStep(2)} className="rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted">
+                  Back
+                </button>
+                <button onClick={handleVideoSubmit} disabled={isPending}
+                  className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+                  {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                  {isPending ? "Queuing…" : "Generate Video"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Video Jobs Gallery */}
+          {videoJobs.length > 0 && (
+            <div className="space-y-3 pt-2 border-t border-border">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Video Library</h3>
+                <button onClick={loadData} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3" /> Refresh
+                </button>
+              </div>
+              <div className="space-y-2">
+                {videoJobs.map(job => (
+                  <div key={job.id} className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{job.prompt}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {job.status === "queued" ? "⏳ Queued — rendering will begin shortly"
+                           : job.status === "processing" ? "🎬 Rendering… check back in 2–5 min"
+                           : job.status === "completed" ? "✅ Ready"
+                           : `❌ Failed: ${job.errorMessage ?? "unknown error"}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {(job.status === "queued" || job.status === "processing") && (
+                          <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                        )}
+                        {job.status === "completed" && job.outputUrl && (
+                          <>
+                            <a href={job.outputUrl} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
+                              <Play className="w-3 h-3" /> Play
+                            </a>
+                            <a href={job.outputUrl} download
+                              className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
+                              <Download className="w-3 h-3" /> Save
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
