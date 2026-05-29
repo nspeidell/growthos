@@ -18,8 +18,11 @@ const CREATOMATE_API_URL = "https://api.creatomate.com/v1";
 // ─── Reunion Brand Defaults ────────────────────────────────────────────────
 
 const BRAND = {
-  primary: "#1B4FFF",      // Reunion blue
-  accent: "#FF6B35",       // warm orange
+  primary: "#35664F",      // Reunion forest green — harmony, safety, growth
+  secondary: "#AAC69D",    // sage green — balance, encourage
+  accent: "#E2AC54",       // warm gold — happiness, optimism, positivity
+  teal: "#B4D8C2",         // mint teal — generosity, hope
+  cream: "#FFF5E6",        // warm cream — innocence, balance
   textLight: "#FFFFFF",
   textDark: "#1A1A2E",
   fontFamily: "Montserrat",
@@ -63,7 +66,7 @@ export function buildVoiceoverVideoSource(options: {
 }): object {
   const { width, height } = FORMAT_DIMENSIONS[options.format];
   const primary = options.brandColors?.primary ?? BRAND.primary;
-  const accent = options.brandColors?.accent ?? BRAND.accent;
+  const accent = options.brandColors?.accent ?? BRAND.accent; // eslint-disable-line @typescript-eslint/no-unused-vars
   const duration = options.durationSeconds ?? 30;
   const bgImages = options.backgroundImageUrls ?? [];
 
@@ -108,7 +111,7 @@ export function buildVoiceoverVideoSource(options: {
     });
   }
 
-  // Dark overlay for text readability
+  // Dark forest-green overlay for text readability (on-brand, not generic black)
   elements.push({
     type: "shape",
     track: 2,
@@ -117,7 +120,7 @@ export function buildVoiceoverVideoSource(options: {
     y: "50%",
     width: "100%",
     height: "100%",
-    fill_color: "rgba(0,0,0,0.45)",
+    fill_color: "rgba(53,100,79,0.55)",  // #35664F at 55% opacity
   });
 
   // Title text (top third)
@@ -174,7 +177,7 @@ export function buildVoiceoverVideoSource(options: {
     ],
   });
 
-  // Branding bar (bottom strip)
+  // Branding bar (bottom strip) — gold accent on green
   elements.push({
     type: "shape",
     track: 6,
@@ -183,7 +186,7 @@ export function buildVoiceoverVideoSource(options: {
     y: "97%",
     width: "100%",
     height: "6%",
-    fill_color: primary,
+    fill_color: BRAND.accent,  // #E2AC54 gold
   });
 
   // Logo (bottom center)
