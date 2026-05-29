@@ -21,6 +21,7 @@ import {
   publishCommunityPost,
   deleteCommunity,
   listConnectedAccountsByPlatform,
+  debugFacebookCommunity,
   type CommunityWithStats,
   type ConnectedAccountSummary,
 } from "./actions";
@@ -49,6 +50,7 @@ export default function CommunitiesDashboard() {
   const [showPostForm, setShowPostForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
   // Create form state
   const [createPlatform, setCreatePlatform] = useState("facebook");
   const [fbAccounts, setFbAccounts] = useState<ConnectedAccountSummary[]>([]);
@@ -108,6 +110,18 @@ export default function CommunitiesDashboard() {
         setPublishError(result.error ?? "Failed to publish");
       }
       await load();
+    });
+  }
+
+  function handleDebug(communityId: string) {
+    setDebugInfo("Loading…");
+    startTransition(async () => {
+      const result = await debugFacebookCommunity(communityId);
+      if (result.success) {
+        setDebugInfo(JSON.stringify(result.data, null, 2));
+      } else {
+        setDebugInfo(`Error: ${result.error}`);
+      }
     });
   }
 
@@ -361,6 +375,17 @@ export default function CommunitiesDashboard() {
                   </div>
                 )}
 
+                {/* Debug output */}
+                {debugInfo && (
+                  <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-yellow-400">Facebook Debug Output</span>
+                      <button onClick={() => setDebugInfo(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    <pre className="text-xs text-foreground whitespace-pre-wrap font-mono overflow-x-auto">{debugInfo}</pre>
+                  </div>
+                )}
+
                 {/* Header */}
                 <div className="rounded-xl border border-border bg-card p-5">
                   <div className="flex items-start justify-between">
@@ -372,6 +397,16 @@ export default function CommunitiesDashboard() {
                         {selected.description || "No description"}
                       </p>
                     </div>
+                    {selected.platform === "facebook" && (
+                      <button
+                        onClick={() => handleDebug(selected.id)}
+                        disabled={isPending}
+                        className="rounded-lg border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+                        title="Debug Facebook config"
+                      >
+                        Debug
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDelete(selected.id)}
                       disabled={isPending}

@@ -323,6 +323,86 @@ export async function publishCommunityPost(
   });
 }
 
+// ─── Debug: Inspect Facebook Community Config ───────────────────────────────
+// Returns the stored group ID, which Page token will be used, and
+// whether the Page can see the group — without posting anything.
+
+export async function debugFacebookCommunity(
+  communityId: string
+): Promise<ActionResult<{
+  groupId: string | null;
+  pages: Array<{ id: string; name: string }>;
+  pageTokenWillBeUsed: string;
+  groupVerified: boolean;
+  groupName?: string;
+  error?: string;
+}>> {
+  return safeAction(async () => {
+    const session = await requirePermission("publish:queue");
+    const { DB, ENCRYPTION_KEY } = getBindings();
+    const db = createDb(DB);
+
+    const community = await db
+      .select()
+      .from(communities)
+      .where(and(eq(communities.id, communityId), eq(communities.workspaceId, session.workspaceId)))
+      .get();
+
+    if (!community) throw new Error("Community not found");
+
+    const account = community.connectedAccountId
+      ? await db.select().from(connectedAccounts).where(eq(connectedAccounts.id, community.connectedAccountId)).get()
+      : null;
+
+    if (!account) {
+      return { groupId: community.platformId ?? null, pages: [], pageTokenWillBeUsed: "none — no account linked", groupVerified: false };
+    }
+
+    const userToken = await decrypt(account.accessTokenEncrypted, ENCRYPTION_KEY);
+    const client = new FacebookGroupsClient(userToken);
+
+    let pages: Array<{ id: string; name: string }> = [];
+    let pageTokenWillBeUsed = "user token (no pages found)";
+    let groupVerified = false;
+    let groupName: string | undefined;
+    let fetchError: string | undefined;
+
+    try {
+      const allPages = await client.getManagedPages();
+      pages = allPages.map(p => ({ id: p.id, name: p.name }));
+
+      // Find Reunion page
+      const match = allPages.find(p => p.name.toLowerCase().includes("reunion")) ?? allPages[0];
+      if (match) {
+        pageTokenWillBeUsed = `Page: "${match.name}" (${match.id})`;
+
+        // Try to fetch the group with the Page token
+        if (community.platformId) {
+          const pageClient = new FacebookGroupsClient(match.access_token);
+          try {
+            const group = await pageClient.getGroup(community.platformId);
+            groupVerified = true;
+            groupName = group.name;
+          } catch (e) {
+            fetchError = e instanceof Error ? e.message : String(e);
+          }
+        }
+      }
+    } catch (e) {
+      fetchError = e instanceof Error ? e.message : String(e);
+    }
+
+    return {
+      groupId: community.platformId ?? null,
+      pages,
+      pageTokenWillBeUsed,
+      groupVerified,
+      groupName,
+      error: fetchError,
+    };
+  });
+}
+
 // ─── Delete Community ───
 
 export async function deleteCommunity(
