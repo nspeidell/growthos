@@ -88,8 +88,9 @@ APP_URL = "http://localhost:3000"
 crons = [
   "* * * * *",       # Every minute: publish due posts, retry failures
   "0 * * * *",       # Hourly: token refresh, metrics sync, competitor scan
-  "0 2 * * *",      # Daily 2am UTC: Swarm overnight mode
-  "0 3 * * *",      # Daily 3am UTC: Growth optimization auto-promote
+  "0 2 * * *",       # Daily 2am UTC: Swarm overnight mode
+  "0 3 * * *",       # Daily 3am UTC: Growth optimization auto-promote
+  "0 12 * * *",      # Daily 12pm UTC: Community post generation (8am ET / 5am PT)
 ]
 
 # ═══════════════════════════════════════════

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect, useTransition, useCallback } from "react";
 import {
   MessagesSquare,
   Plus,
@@ -13,6 +13,16 @@ import {
   BarChart3,
   AlertCircle,
   ExternalLink,
+  Zap,
+  Copy,
+  Check,
+  RefreshCw,
+  Repeat2,
+  MessageSquare,
+  Sparkles,
+  Power,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import {
   listCommunities,
@@ -25,6 +35,17 @@ import {
   type CommunityWithStats,
   type ConnectedAccountSummary,
 } from "./actions";
+import {
+  listCommunityCampaigns,
+  createCommunityCampaign,
+  toggleCampaign,
+  deleteCampaign,
+  generatePostsNow,
+  generateCommentSuggestions,
+  adaptPostForPlatform,
+  getRepostSuggestions,
+} from "./campaign-actions";
+import type { CommunityCampaign, CommunityPost } from "@/lib/db/schema";
 
 const PLATFORM_META: Record<string, { label: string; color: string }> = {
   facebook: { label: "Facebook Group", color: "bg-blue-600" },
@@ -45,12 +66,24 @@ export default function CommunitiesDashboard() {
   const [communities, setCommunities] = useState<CommunityWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState<"communities" | "create">("communities");
+  const [activeTab, setActiveTab] = useState<"communities" | "create" | "autopost">("communities");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showPostForm, setShowPostForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string | null>(null);
+  // Campaign state
+  const [campaigns, setCampaigns] = useState<CommunityCampaign[]>([]);
+  const [showCampaignForm, setShowCampaignForm] = useState(false);
+  const [campaignCommunityId, setCampaignCommunityId] = useState<string>("");
+  const [generatingPost, setGeneratingPost] = useState<string | null>(null);
+  const [commentPost, setCommentPost] = useState<string | null>(null);
+  const [commentContext, setCommentContext] = useState("");
+  const [commentSuggestions, setCommentSuggestions] = useState<string[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [adaptingPost, setAdaptingPost] = useState<string | null>(null);
+  const [adaptedContent, setAdaptedContent] = useState<{ title?: string; body: string } | null>(null);
+  const [repostSuggestions, setRepostSuggestions] = useState<CommunityPost[]>([]);
   // Create form state
   const [createPlatform, setCreatePlatform] = useState("facebook");
   const [fbAccounts, setFbAccounts] = useState<ConnectedAccountSummary[]>([]);
@@ -113,6 +146,74 @@ export default function CommunitiesDashboard() {
     });
   }
 
+  // Campaign handlers
+  const loadCampaigns = useCallback(async () => {
+    const res = await listCommunityCampaigns();
+    if (res.success) setCampaigns(res.data);
+  }, []);
+
+  useEffect(() => { loadCampaigns(); }, [loadCampaigns]);
+
+  function handleCreateCampaign(formData: FormData) {
+    startTransition(async () => {
+      const res = await createCommunityCampaign(formData);
+      if (res.success) {
+        setShowCampaignForm(false);
+        await loadCampaigns();
+      }
+    });
+  }
+
+  function handleGenerateNow(campaignId: string) {
+    setGeneratingPost(campaignId);
+    startTransition(async () => {
+      await generatePostsNow(campaignId);
+      await load();
+      setGeneratingPost(null);
+    });
+  }
+
+  async function handleCopy(text: string, id: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch { /* ignore */ }
+  }
+
+  function handleGetCommentSuggestions(postId: string) {
+    setCommentPost(postId);
+    setCommentSuggestions([]);
+    setCommentContext("");
+  }
+
+  function handleFetchSuggestions() {
+    if (!commentPost) return;
+    startTransition(async () => {
+      const res = await generateCommentSuggestions(commentPost, commentContext);
+      if (res.success) setCommentSuggestions(res.data);
+    });
+  }
+
+  function handleAdaptPost(postId: string) {
+    setAdaptingPost(postId);
+    setAdaptedContent(null);
+  }
+
+  function handleAdaptForPlatform(postId: string, platform: "facebook" | "reddit" | "instagram" | "twitter") {
+    startTransition(async () => {
+      const res = await adaptPostForPlatform(postId, platform);
+      if (res.success) setAdaptedContent(res.data);
+    });
+  }
+
+  function handleLoadRepostSuggestions(communityId: string) {
+    startTransition(async () => {
+      const res = await getRepostSuggestions(communityId);
+      if (res.success) setRepostSuggestions(res.data);
+    });
+  }
+
   function handleDebug(communityId: string) {
     setDebugInfo("Loading…");
     startTransition(async () => {
@@ -170,6 +271,22 @@ export default function CommunitiesDashboard() {
         >
           <Plus className="w-4 h-4" />
           Add Community
+        </button>
+        <button
+          onClick={() => setActiveTab("autopost")}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors flex items-center gap-1.5 ${
+            activeTab === "autopost"
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          <Zap className="w-4 h-4" />
+          Auto-Post
+          {campaigns.filter(c => c.isActive).length > 0 && (
+            <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
+              {campaigns.filter(c => c.isActive).length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -604,6 +721,329 @@ export default function CommunitiesDashboard() {
               </div>
             )}
           </div>
+        </div>
+      )}
+      {/* ── Auto-Post Tab ─────────────────────────────────────────────────── */}
+      {activeTab === "autopost" && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Zap className="w-5 h-5 text-primary" /> Auto-Post Campaigns
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                AI drafts your community posts daily. Wake up, copy, paste, done.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowCampaignForm(f => !f)}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              <Plus className="w-4 h-4" /> New Campaign
+            </button>
+          </div>
+
+          {/* Campaign Form */}
+          {showCampaignForm && (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <h3 className="font-semibold mb-4">Set Up Auto-Post Campaign</h3>
+              <form action={handleCreateCampaign} className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Campaign Name</label>
+                    <input name="name" required placeholder="Daily Reunion Posts"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Community</label>
+                    <select name="communityId" required
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                      <option value="">Select community…</option>
+                      {communities.map(c => (
+                        <option key={c.id} value={c.id}>{c.name} ({c.platform})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Doctrine / Voice</label>
+                    <select name="doctrineMode"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                      <option value="balanced">Balanced (recommended)</option>
+                      <option value="hormozi">Hormozi — Direct & High Value</option>
+                      <option value="garyvee">GaryVee — Raw & Authentic</option>
+                      <option value="sethgodin">Seth Godin — Thoughtful & Tribal</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Ready by (UTC hour)</label>
+                    <select name="generateAtUtcHour"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                      <option value="10">10 UTC = 6am ET / 3am PT</option>
+                      <option value="11">11 UTC = 7am ET / 4am PT</option>
+                      <option value="12" selected>12 UTC = 8am ET / 5am PT</option>
+                      <option value="13">13 UTC = 9am ET / 6am PT</option>
+                    </select>
+                  </div>
+                </div>
+                <input type="hidden" name="contentPillars"
+                  value='["family connection","legacy","current events","engagement","humor"]' />
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Custom Instructions (optional)</label>
+                  <textarea name="customInstructions" rows={2} placeholder="e.g. Always tie back to the idea that family connection is a choice, not a circumstance."
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowCampaignForm(false)}
+                    className="flex-1 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted/50">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={isPending}
+                    className="flex-1 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+                    {isPending ? "Creating…" : "Create Campaign"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Campaign List */}
+          {campaigns.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border p-10 text-center">
+              <Zap className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+              <p className="font-medium text-sm">No campaigns yet</p>
+              <p className="text-xs text-muted-foreground mt-1">Set up a campaign and GrowthOS will draft your posts every morning.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {campaigns.map(campaign => {
+                const community = communities.find(c => c.id === campaign.communityId);
+                const todaysDrafts = community?.posts?.filter(p => {
+                  const d = new Date(p.createdAt ?? 0);
+                  const today = new Date();
+                  return p.postStatus === "draft" &&
+                    d.toDateString() === today.toDateString();
+                }) ?? [];
+
+                return (
+                  <div key={campaign.id} className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${campaign.isActive ? "bg-green-400" : "bg-muted-foreground"}`} />
+                          <span className="font-semibold text-sm">{campaign.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {community?.name ?? "—"} · {community?.platform}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Voice: {campaign.doctrineMode} · Runs at {campaign.generateAtUtcHour}:00 UTC daily
+                        </p>
+                        {campaign.customInstructions && (
+                          <p className="text-xs text-muted-foreground mt-0.5 italic">"{campaign.customInstructions}"</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => handleGenerateNow(campaign.id)}
+                          disabled={isPending || generatingPost === campaign.id}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+                          title="Generate today's post now"
+                        >
+                          {generatingPost === campaign.id
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <Sparkles className="w-3 h-3" />}
+                          Generate Now
+                        </button>
+                        <button
+                          onClick={() => toggleCampaign(campaign.id, !campaign.isActive).then(loadCampaigns)}
+                          className={`rounded-lg p-1.5 border transition-colors ${campaign.isActive ? "border-green-500/30 text-green-400 hover:bg-green-500/10" : "border-border text-muted-foreground hover:bg-muted"}`}
+                          title={campaign.isActive ? "Pause campaign" : "Activate campaign"}
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => deleteCampaign(campaign.id).then(loadCampaigns)}
+                          className="rounded-lg p-1.5 border border-destructive/20 text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Today's drafts */}
+                    {todaysDrafts.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-border space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Today's drafts ready to post:</p>
+                        {todaysDrafts.map(post => {
+                          const fullText = post.title ? `${post.title}\n\n${post.body}` : post.body;
+                          return (
+                            <div key={post.id} className="rounded-lg bg-muted/40 p-3">
+                              {post.title && <p className="text-xs font-semibold mb-1">{post.title}</p>}
+                              <p className="text-sm text-foreground">{post.body}</p>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {/* Copy & Open */}
+                                {community?.platform === "facebook" && community.platformId && (
+                                  <button
+                                    onClick={async () => {
+                                      await handleCopy(fullText, `copy-${post.id}`);
+                                      window.open(`https://www.facebook.com/groups/${community.platformId}`, "_blank");
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                                  >
+                                    {copiedId === `copy-${post.id}` ? <Check className="w-3 h-3" /> : <ExternalLink className="w-3 h-3" />}
+                                    Copy & Open Group
+                                  </button>
+                                )}
+                                {community?.platform === "reddit" && (
+                                  <button
+                                    onClick={() => handleCopy(fullText, `copy-${post.id}`)}
+                                    className="inline-flex items-center gap-1 rounded-md bg-orange-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-orange-700"
+                                  >
+                                    {copiedId === `copy-${post.id}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                                    Copy for Reddit
+                                  </button>
+                                )}
+                                {/* Mark Posted */}
+                                <button
+                                  onClick={() => handlePublish(post.id).then(load)}
+                                  disabled={isPending}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                                >
+                                  <CheckCircle2 className="w-3 h-3" /> Mark Posted
+                                </button>
+                                {/* AI Comment Suggestions */}
+                                <button
+                                  onClick={() => handleGetCommentSuggestions(post.id)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                                >
+                                  <MessageSquare className="w-3 h-3" /> Reply Ideas
+                                </button>
+                                {/* Cross-platform adapt */}
+                                <button
+                                  onClick={() => handleAdaptPost(post.id)}
+                                  className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                                >
+                                  <Repeat2 className="w-3 h-3" /> Adapt
+                                </button>
+                              </div>
+
+                              {/* Comment Suggestions Panel */}
+                              {commentPost === post.id && (
+                                <div className="mt-3 pt-3 border-t border-border space-y-2">
+                                  <p className="text-xs font-medium">Paste a comment to get reply ideas:</p>
+                                  <textarea
+                                    value={commentContext}
+                                    onChange={e => setCommentContext(e.target.value)}
+                                    placeholder="e.g. 'We do game night every Friday!'"
+                                    rows={2}
+                                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+                                  />
+                                  <button
+                                    onClick={handleFetchSuggestions}
+                                    disabled={isPending || !commentContext}
+                                    className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+                                  >
+                                    {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                                    Get Reply Ideas
+                                  </button>
+                                  {commentSuggestions.map((s, i) => (
+                                    <div key={i} className="flex items-start gap-2 rounded-lg bg-muted/60 p-2">
+                                      <span className="text-xs text-muted-foreground font-mono">{i + 1}</span>
+                                      <p className="text-xs flex-1">{s}</p>
+                                      <button onClick={() => handleCopy(s, `reply-${i}`)}
+                                        className="text-muted-foreground hover:text-foreground flex-shrink-0">
+                                        {copiedId === `reply-${i}` ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Cross-Platform Adapt Panel */}
+                              {adaptingPost === post.id && (
+                                <div className="mt-3 pt-3 border-t border-border space-y-2">
+                                  <p className="text-xs font-medium">Adapt for another platform:</p>
+                                  <div className="flex gap-2 flex-wrap">
+                                    {(["facebook", "reddit", "instagram", "twitter"] as const)
+                                      .filter(p => p !== community?.platform)
+                                      .map(p => (
+                                        <button key={p} onClick={() => handleAdaptForPlatform(post.id, p)}
+                                          disabled={isPending}
+                                          className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted capitalize disabled:opacity-50">
+                                          {p === "twitter" ? "X / Twitter" : p.charAt(0).toUpperCase() + p.slice(1)}
+                                        </button>
+                                      ))}
+                                  </div>
+                                  {adaptedContent && (
+                                    <div className="rounded-lg bg-muted/60 p-3 space-y-1">
+                                      {adaptedContent.title && <p className="text-xs font-semibold">{adaptedContent.title}</p>}
+                                      <p className="text-xs">{adaptedContent.body}</p>
+                                      <button onClick={() => handleCopy(
+                                        adaptedContent.title ? `${adaptedContent.title}\n\n${adaptedContent.body}` : adaptedContent.body,
+                                        "adapted"
+                                      )} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1">
+                                        {copiedId === "adapted" ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                                        Copy adapted post
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Repost Suggestions */}
+          {communities.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Repeat2 className="w-4 h-4 text-primary" /> Repost Suggestions
+                </h3>
+                <select
+                  onChange={e => e.target.value && handleLoadRepostSuggestions(e.target.value)}
+                  className="rounded-lg border border-border bg-background px-2 py-1 text-xs focus:outline-none"
+                >
+                  <option value="">Select community…</option>
+                  {communities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              {repostSuggestions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Select a community to find high-performing posts worth reposting.</p>
+              ) : (
+                <div className="space-y-2">
+                  {repostSuggestions.map(post => (
+                    <div key={post.id} className="flex items-start gap-3 rounded-lg bg-muted/30 p-3">
+                      <div className="flex-1 min-w-0">
+                        {post.title && <p className="text-xs font-medium">{post.title}</p>}
+                        <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{post.body}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {post.likes ?? 0} likes · {post.comments ?? 0} comments
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleCopy(post.title ? `${post.title}\n\n${post.body}` : post.body, `repost-${post.id}`)}
+                        className="flex-shrink-0 inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted"
+                      >
+                        {copiedId === `repost-${post.id}` ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                        Copy
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

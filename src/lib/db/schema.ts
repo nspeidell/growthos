@@ -1487,6 +1487,34 @@ export const swarmLogsRelations = relations(swarmLogs, ({ one }) => ({
   }),
 }));
 
+// ─── Community Campaigns ───
+export const communityCampaigns = sqliteTable("community_campaigns", {
+  id: text("id").primaryKey().$defaultFn(() => createId()),
+  workspaceId: text("workspace_id").notNull(),
+  communityId: text("community_id").notNull().references(() => communities.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  postsPerDay: integer("posts_per_day").notNull().default(1),
+  generateAtUtcHour: integer("generate_at_utc_hour").notNull().default(12),
+  doctrineMode: text("doctrine_mode").notNull().default("balanced"),
+  contentPillars: text("content_pillars").notNull().default('["family connection","legacy","current events","engagement","humor"]'),
+  customInstructions: text("custom_instructions"),
+  includeCurrentEvents: integer("include_current_events", { mode: "boolean" }).notNull().default(true),
+  lastGeneratedDate: text("last_generated_date"), // YYYY-MM-DD UTC
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const communityCampaignsRelations = relations(communityCampaigns, ({ one }) => ({
+  community: one(communities, {
+    fields: [communityCampaigns.communityId],
+    references: [communities.id],
+  }),
+}));
+
+export type CommunityCampaign = typeof communityCampaigns.$inferSelect;
+export type NewCommunityCampaign = typeof communityCampaigns.$inferInsert;
+
 // Phase 7
 export type Community = typeof communities.$inferSelect;
 export type NewCommunity = typeof communities.$inferInsert;
