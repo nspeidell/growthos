@@ -51,6 +51,7 @@ export interface CloudflareEnv {
 
   // Phase 8: Video Engine
   ELEVEN_LABS_API_KEY: string;
+  DID_API_KEY?: string;
 
   // Phase 13: Media Generation
   REPLICATE_API_TOKEN: string;
@@ -66,6 +67,9 @@ export interface CloudflareEnv {
   // Vars
   ENVIRONMENT: string;
   APP_URL: string;
+  CRON_SECRET?: string;
+  MEDIA_SERVE_TOKEN?: string;
+  R2_PUBLIC_URL?: string;
 }
 
 export function getBindings(): CloudflareEnv {

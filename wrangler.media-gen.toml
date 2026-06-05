@@ -1,0 +1,44 @@
+name = "growthos-media-gen"
+main = "src/workers/media-gen.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Database ───
+[[d1_databases]]
+binding = "DB"
+database_name = "growthos-prod"
+database_id = "2b46db77-e682-45de-8205-b223246b7334"
+
+# ─── Object Storage ───
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "growthos-media"
+
+# ─── Key-Value Store ───
+[[kv_namespaces]]
+binding = "KV"
+id = "80d4197d04d144429f836a614acaca50"
+
+# ─── Queue consumer (required by Cloudflare since worker was originally registered) ───
+# No messages are sent here — work is picked up via cron + D1 polling instead.
+[[queues.consumers]]
+queue = "growthos-media"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 0
+
+# ─── Cron: poll D1 for queued jobs every minute ───
+[triggers]
+crons = ["* * * * *"]
+
+# ─── Environment Variables ───
+[vars]
+APP_URL = "https://growthos-eo1.pages.dev"
+R2_PUBLIC_URL = "https://pub-fff12e42fe61481ea170c0c8c2e1e3bf.r2.dev"
+
+# ─── Secrets (set once via CLI, same values as Pages project) ───
+# wrangler secret put ELEVEN_LABS_API_KEY --config wrangler.media-gen.toml
+# wrangler secret put REPLICATE_API_TOKEN --config wrangler.media-gen.toml
+# wrangler secret put CREATOMATE_API_KEY --config wrangler.media-gen.toml
+# MEDIA_SERVE_TOKEN — set via Cloudflare dashboard (Workers → growthos-media-gen → Settings)
+# DID_API_KEY — set via Cloudflare dashboard (Workers → growthos-media-gen → Settings)

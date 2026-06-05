@@ -292,13 +292,15 @@ export const mediaJobs = sqliteTable("media_jobs", {
       "thumbnail",
       "promo",
       "carousel_slide",
+      "carousel",
       "ad_creative",
       "video_composite",
+      "avatar_video",
     ],
   }).notNull(),
   prompt: text("prompt").notNull(),
   provider: text("provider", {
-    enum: ["replicate", "together", "cloudflare", "elevenlabs"],
+    enum: ["replicate", "together", "cloudflare", "elevenlabs", "did"],
   }).notNull(),
   voiceProfileId: text("voice_profile_id").references(() => voiceProfiles.id),
   config: text("config"), // JSON: dimensions, style, template

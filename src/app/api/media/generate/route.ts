@@ -26,8 +26,10 @@ const GenerateSchema = z.object({
     "thumbnail",
     "promo",
     "carousel_slide",
+    "carousel",
     "ad_creative",
     "video_composite",
+    "avatar_video",
   ]),
   prompt: z.string().min(1).max(5000),
   provider: z.enum(["replicate", "together", "cloudflare", "elevenlabs"]).optional(),
@@ -44,6 +46,11 @@ const GenerateSchema = z.object({
           height: z.number(),
         })
         .optional(),
+      // Video composite fields passed from Video Studio UI
+      voiceId: z.string().optional(),
+      voiceName: z.string().optional(),
+      format: z.enum(["vertical", "square", "horizontal"]).optional(),
+      imagePrompts: z.array(z.string()).optional(),
     })
     .optional(),
 });

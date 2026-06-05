@@ -293,10 +293,16 @@ export default {
           : undefined;
 
         // Publish via platform adapter
+        // mediaUrl + mediaType are stored in metadata when scheduling video posts
+        const mediaUrl = metadata?.mediaUrl as string | undefined;
+        const mediaType = metadata?.mediaType as "video" | "image" | undefined;
+
         const result = await publishToplatform(job.platform, {
           body: job.contentBody,
           accessToken,
           metadata,
+          mediaUrl,
+          mediaType,
         });
 
         // Mark as published

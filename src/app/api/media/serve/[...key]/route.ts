@@ -29,18 +29,24 @@ export async function GET(
   { params }: { params: Promise<{ key: string[] }> }
 ) {
   try {
-    const session = await requirePermission("content:read");
     const { key } = await params;
     const r2Key = key.join("/");
-
-    // Security: ensure the key belongs to the user's workspace
-    // Keys follow pattern: media/{workspaceId}/...
-    const keyParts = r2Key.split("/");
-    if (keyParts[0] === "media" && keyParts[1] !== session.workspaceId) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const { BUCKET } = getBindings();
+
+    // Allow worker-to-worker access via CRON_SECRET token (used by media-gen worker
+    // to give Creatomate a downloadable URL without session cookies)
+    const token = request.nextUrl.searchParams.get("token");
+    const env = getBindings();
+    const isWorkerToken = token && env.MEDIA_SERVE_TOKEN && token === env.MEDIA_SERVE_TOKEN;
+
+    if (!isWorkerToken) {
+      // Fall back to session auth for browser requests
+      const session = await requirePermission("content:read");
+      const keyParts = r2Key.split("/");
+      if (keyParts[0] === "media" && keyParts[1] !== session.workspaceId) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
     const object = await BUCKET.get(r2Key);
 
     if (!object) {

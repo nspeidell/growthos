@@ -8,63 +8,18 @@
  */
 
 import { z } from "zod";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { requirePermission } from "@/lib/auth/middleware";
 import { getBindings } from "@/lib/cloudflare/bindings";
 import { createDb } from "@/lib/db/client";
-import { mediaJobs } from "@/lib/db/schema";
+import { mediaJobs, contentAssets, contentProjects, scheduledPosts, connectedAccounts } from "@/lib/db/schema";
 import { safeAction, type ActionResult } from "@/lib/utils/api";
+import type { NewScheduledPost } from "@/lib/db/schema";
 import { generateWithClaude } from "@/lib/ai/claude";
 import { ElevenLabsClient, type VoiceInfo } from "@/lib/video/elevenlabs-client";
+export type { VoiceInfo };
+import { createId } from "@paralleldrive/cuid2";
 import type { MediaJob } from "@/lib/db/schema";
-
-// ─── Curated voice presets for Reunion's warm/family brand ───────────────────
-// These are ElevenLabs pre-built voices — no custom voice needed.
-
-export const REUNION_VOICE_PRESETS = [
-  {
-    id: "21m00Tcm4TlvDq8ikWAM",
-    name: "Rachel",
-    description: "Calm, clear, warm — perfect for family storytelling",
-    gender: "female",
-    recommended: true,
-  },
-  {
-    id: "ErXwobaYiN019PkySvjV",
-    name: "Antoni",
-    description: "Well-rounded, natural, trustworthy — great for advice content",
-    gender: "male",
-    recommended: true,
-  },
-  {
-    id: "TxGEqnHWrfWFTfGW9XjX",
-    name: "Josh",
-    description: "Deep, confident, warm — strong for motivational content",
-    gender: "male",
-    recommended: false,
-  },
-  {
-    id: "AZnzlk1XvdvUeBnXmlld",
-    name: "Domi",
-    description: "Strong, engaging, energetic — good for challenge/activity posts",
-    gender: "female",
-    recommended: false,
-  },
-  {
-    id: "MF3mGyEYCl7XYWbV9V6O",
-    name: "Elli",
-    description: "Young, bright, approachable — great for humor and relatable content",
-    gender: "female",
-    recommended: false,
-  },
-  {
-    id: "pNInz6obpgDQGcFmaJgB",
-    name: "Adam",
-    description: "Neutral, professional, clear — versatile for any content",
-    gender: "male",
-    recommended: false,
-  },
-] as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -196,7 +151,8 @@ export async function createVoiceoverVideoJob(
 ): Promise<ActionResult<{ jobId: string; status: string }>> {
   return safeAction(async () => {
     const session = await requirePermission("content:write");
-    const { APP_URL } = getBindings();
+    const { DB } = getBindings();
+    const db = createDb(DB);
 
     const script = formData.get("script") as string;
     const voiceId = formData.get("voiceId") as string;
@@ -213,45 +169,32 @@ export async function createVoiceoverVideoJob(
       imagePrompts = imagePromptsRaw ? JSON.parse(imagePromptsRaw) : [];
     } catch { /* use empty */ }
 
-    // Submit to media generation API
-    // This queues a video_composite job through MEDIA_QUEUE
-    const response = await fetch(`${APP_URL}/api/media/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "video_composite",
-        prompt: title,
-        provider: "elevenlabs",
-        config: {
-          script,
-          voiceId,
-          voiceName,
-          format,
-          imagePrompts,
-          duration: Math.ceil((script.split(" ").length / 130) * 60) + 5, // estimated duration
-          resolution: format === "vertical"
-            ? { width: 1080, height: 1920 }
-            : format === "square"
-            ? { width: 1080, height: 1080 }
-            : { width: 1920, height: 1080 },
-        },
-      }),
+    const duration = Math.ceil((script.split(" ").length / 130) * 60) + 5;
+    const config = { script, voiceId, voiceName, format, imagePrompts, duration };
+
+    // Insert into D1 with status='queued'. The growthos-media-gen cron Worker
+    // polls D1 every minute and picks this up — no queue binding needed in Pages.
+    const id = createId();
+    await db.insert(mediaJobs).values({
+      id,
+      workspaceId: session.workspaceId,
+      type: "video_composite",
+      prompt: title,
+      provider: "elevenlabs",
+      config: JSON.stringify(config),
+      status: "queued",
+      createdBy: session.userId,
+      createdAt: new Date(),
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Failed to queue video job: ${err}`);
-    }
-
-    const result = (await response.json()) as { jobId: string; status: string };
-    return { jobId: result.jobId, status: result.status };
+    return { jobId: id, status: "queued" };
   });
 }
 
 // ─── List Media Jobs ──────────────────────────────────────────────────────────
 
 export async function listMediaJobs(
-  typeFilter?: "video_composite" | "image" | "all"
+  typeFilter?: "video_composite" | "image" | "carousel" | "all"
 ): Promise<ActionResult<MediaJob[]>> {
   return safeAction(async () => {
     const session = await requirePermission("content:read");
@@ -275,6 +218,9 @@ export async function listMediaJobs(
     if (typeFilter === "image") {
       return jobs.filter(j => imageTypes.includes(j.type));
     }
+    if (typeFilter === "carousel") {
+      return jobs.filter(j => j.type === "carousel");
+    }
     return jobs;
   });
 }
@@ -293,5 +239,337 @@ export async function getMediaJob(jobId: string): Promise<ActionResult<MediaJob>
 
     if (!job) throw new Error("Job not found");
     return job;
+  });
+}
+
+// ─── Schedule Video Post ──────────────────────────────────────────────────────
+
+export interface ScheduleVideoResult {
+  scheduled: number;
+  skipped: string[];
+}
+
+// scheduleVideoPost is an alias for scheduleMediaPost — handles both video and image
+export const scheduleVideoPost = async (fd: FormData) => scheduleMediaPost(fd, "video");
+export const scheduleImagePost = async (fd: FormData) => scheduleMediaPost(fd, "image");
+
+async function scheduleMediaPost(formData: FormData, mediaType: "video" | "image"): Promise<ActionResult<ScheduleVideoResult>> {
+  return safeAction(async () => {
+    const session = await requirePermission("publish:queue");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const jobId = formData.get("jobId") as string;
+    const caption = formData.get("caption") as string;
+    const scheduledFor = formData.get("scheduledFor") as string;
+    const platformsRaw = formData.get("platforms") as string;
+    const platforms: string[] = platformsRaw ? JSON.parse(platformsRaw) : [];
+
+    if (!jobId) throw new Error("jobId is required");
+    if (!platforms.length) throw new Error("Select at least one platform");
+    if (!scheduledFor) throw new Error("Schedule time is required");
+
+    // Get the completed media job
+    const job = await db.select().from(mediaJobs)
+      .where(and(eq(mediaJobs.id, jobId), eq(mediaJobs.workspaceId, session.workspaceId)))
+      .get();
+
+    if (!job) throw new Error("Media job not found");
+    if (job.status !== "completed" || !job.resultR2Key) throw new Error("Media is not ready yet");
+
+    // Public R2 URL — accessible by external services (Instagram, Facebook, etc.)
+    const R2_PUBLIC_URL = "https://pub-fff12e42fe61481ea170c0c8c2e1e3bf.r2.dev";
+    const mediaUrl = `${R2_PUBLIC_URL}/${job.resultR2Key}`;
+
+    // Get active connected accounts for this workspace
+    const accounts = await db.select().from(connectedAccounts)
+      .where(eq(connectedAccounts.workspaceId, session.workspaceId))
+      .all();
+    const activeAccounts = accounts.filter(a => a.accountStatus === "active");
+
+    // Create a shared content project + one asset per platform
+    const projectId = createId();
+    const now = new Date();
+    type ContentAssetInsert = typeof contentAssets.$inferInsert;
+    type ContentProjectInsert = typeof contentProjects.$inferInsert;
+
+    const project: ContentProjectInsert = {
+      id: projectId,
+      workspaceId: session.workspaceId,
+      title: job.prompt,
+      brief: caption,
+      doctrineMode: "balanced",
+      createdBy: session.userId,
+      createdAt: now,
+    };
+    await db.insert(contentProjects).values(project);
+
+    let scheduled = 0;
+    const skipped: string[] = [];
+
+    for (const platform of platforms) {
+      const account = activeAccounts.find(a => a.platform === platform);
+      if (!account) { skipped.push(platform); continue; }
+
+      const assetId = createId();
+      const asset: ContentAssetInsert = {
+        id: assetId,
+        projectId,
+        platform: platform as ContentAssetInsert["platform"],
+        type: "reel_script" as ContentAssetInsert["type"],
+        body: caption,
+        version: 1,
+        status: "approved",
+        createdAt: now,
+      };
+      await db.insert(contentAssets).values(asset);
+
+      const postId = createId();
+      await db.insert(scheduledPosts).values({
+        id: postId,
+        workspaceId: session.workspaceId,
+        contentAssetId: assetId,
+        connectedAccountId: account.id,
+        platform: platform as NewScheduledPost["platform"],
+        scheduledFor: new Date(scheduledFor),
+        approvalMode: "autonomous",
+        postStatus: "queued",
+        metadata: JSON.stringify({ mediaUrl, mediaType }),
+        createdBy: session.userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      scheduled++;
+    }
+
+    return { scheduled, skipped };
+  });
+}
+
+// ─── Carousel Generation ──────────────────────────────────────────────────────
+
+export interface CarouselSlide {
+  slideNumber: number;
+  headline: string;
+  body: string;
+  imagePrompt: string;
+}
+
+export async function generateCarouselSlides(
+  formData: FormData
+): Promise<ActionResult<{ slides: CarouselSlide[]; title: string; caption: string }>> {
+  return safeAction(async () => {
+    await requirePermission("content:write");
+
+    const topic = formData.get("topic") as string;
+    const slideCount = parseInt((formData.get("slideCount") as string) ?? "5");
+    const contentPillar = (formData.get("contentPillar") as string) ?? "family_connection";
+
+    if (!topic?.trim()) throw new Error("Topic is required");
+
+    const pillarContext: Record<string, string> = {
+      family_connection: "a family activity, challenge, or ritual that brings people together",
+      legacy_memory: "preserving family stories and honoring family history",
+      engagement: "a thought-provoking question that gets families reflecting and sharing",
+      humor: "a genuinely funny, relatable family moment",
+      product_awareness: "how the Reunion app helps families stay connected",
+    };
+
+    const generated = await generateWithClaude({
+      systemPrompt: `You are a social media carousel creator for Reunion — a family connection app.
+You create scroll-stopping Instagram carousels. Each slide has a short punchy headline and 1-2 sentence body.
+Slide 1 = hook (stop the scroll). Last slide = CTA. Middle slides = value/insight.
+Keep everything warm, human, and family-focused.`,
+      userMessage: `Create a ${slideCount}-slide Instagram carousel about: "${topic}"
+Content focus: ${pillarContext[contentPillar] ?? "family connection"}
+
+Return JSON with this exact structure:
+{
+  "title": "Short carousel title (5-7 words)",
+  "caption": "Instagram caption for the post (150-200 chars, include relevant hashtags)",
+  "slides": [
+    {
+      "slideNumber": 1,
+      "headline": "Short punchy headline (max 8 words)",
+      "body": "1-2 sentences of body copy",
+      "imagePrompt": "Stable Diffusion prompt for warm family background photo (no text, no logos)"
+    }
+  ]
+}`,
+      maxTokens: 1500,
+    });
+
+    let parsed: { title: string; caption: string; slides: CarouselSlide[] };
+    try {
+      const jsonMatch = generated.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON in response");
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      throw new Error("Failed to parse carousel content from AI response");
+    }
+
+    return parsed;
+  });
+}
+
+export async function createCarouselJob(
+  formData: FormData
+): Promise<ActionResult<{ jobId: string; status: string }>> {
+  return safeAction(async () => {
+    const session = await requirePermission("content:write");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const slidesRaw = formData.get("slides") as string;
+    const caption = (formData.get("caption") as string) || "Reunion Carousel";
+    const title = (formData.get("title") as string) || caption;
+
+    if (!slidesRaw) throw new Error("Slides data is required");
+
+    const slides: CarouselSlide[] = JSON.parse(slidesRaw);
+    if (!slides.length) throw new Error("At least one slide required");
+
+    const config = { slides, caption };
+    const id = createId();
+
+    await db.insert(mediaJobs).values({
+      id,
+      workspaceId: session.workspaceId,
+      type: "carousel",
+      prompt: title,
+      provider: "replicate",
+      config: JSON.stringify(config),
+      status: "queued",
+      createdBy: session.userId,
+      createdAt: new Date(),
+    });
+
+    return { jobId: id, status: "queued" };
+  });
+}
+
+export async function scheduleCarouselPost(
+  formData: FormData
+): Promise<ActionResult<ScheduleVideoResult>> {
+  return safeAction(async () => {
+    const session = await requirePermission("publish:queue");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const jobId = formData.get("jobId") as string;
+    const caption = formData.get("caption") as string;
+    const scheduledFor = formData.get("scheduledFor") as string;
+    const platformsRaw = formData.get("platforms") as string;
+    const platforms: string[] = platformsRaw ? JSON.parse(platformsRaw) : [];
+
+    if (!jobId || !platforms.length || !scheduledFor) throw new Error("Missing required fields");
+
+    const job = await db.select().from(mediaJobs)
+      .where(and(eq(mediaJobs.id, jobId), eq(mediaJobs.workspaceId, session.workspaceId)))
+      .get();
+
+    if (!job || job.status !== "completed" || !job.resultR2Key) throw new Error("Carousel is not ready yet");
+
+    // resultR2Key for carousels is the manifest JSON key
+    // The manifest contains all slide R2 keys
+    const R2_PUBLIC_URL = "https://pub-fff12e42fe61481ea170c0c8c2e1e3bf.r2.dev";
+    const manifestUrl = `${R2_PUBLIC_URL}/${job.resultR2Key}`;
+
+    const accounts = await db.select().from(connectedAccounts)
+      .where(eq(connectedAccounts.workspaceId, session.workspaceId))
+      .all();
+    const activeAccounts = accounts.filter(a => a.accountStatus === "active");
+
+    const projectId = createId();
+    const now = new Date();
+    type ContentProjectInsert = typeof contentProjects.$inferInsert;
+    type ContentAssetInsert = typeof contentAssets.$inferInsert;
+
+    const project: ContentProjectInsert = {
+      id: projectId,
+      workspaceId: session.workspaceId,
+      title: job.prompt,
+      brief: caption,
+      doctrineMode: "balanced",
+      createdBy: session.userId,
+      createdAt: now,
+    };
+    await db.insert(contentProjects).values(project);
+
+    let scheduled = 0;
+    const skipped: string[] = [];
+
+    for (const platform of platforms) {
+      const account = activeAccounts.find(a => a.platform === platform);
+      if (!account) { skipped.push(platform); continue; }
+
+      const assetId = createId();
+      const asset: ContentAssetInsert = {
+        id: assetId,
+        projectId,
+        platform: platform as ContentAssetInsert["platform"],
+        type: "carousel_slide" as ContentAssetInsert["type"],
+        body: caption,
+        version: 1,
+        status: "approved",
+        createdAt: now,
+      };
+      await db.insert(contentAssets).values(asset);
+
+      await db.insert(scheduledPosts).values({
+        id: createId(),
+        workspaceId: session.workspaceId,
+        contentAssetId: assetId,
+        connectedAccountId: account.id,
+        platform: platform as NewScheduledPost["platform"],
+        scheduledFor: new Date(scheduledFor),
+        approvalMode: "autonomous",
+        postStatus: "queued",
+        metadata: JSON.stringify({ mediaUrl: manifestUrl, mediaType: "carousel", mediaJobId: jobId }),
+        createdBy: session.userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      scheduled++;
+    }
+
+    return { scheduled, skipped };
+  });
+}
+
+// ─── Avatar Video (D-ID) ──────────────────────────────────────────────────────
+
+export async function createAvatarJob(
+  formData: FormData
+): Promise<ActionResult<{ jobId: string; status: string }>> {
+  return safeAction(async () => {
+    const session = await requirePermission("content:write");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const script = formData.get("script") as string;
+    const presenterImageUrl = formData.get("presenterImageUrl") as string;
+    const voiceId = (formData.get("voiceId") as string) || undefined;
+    const title = (formData.get("title") as string) || "Avatar Video";
+
+    if (!script?.trim()) throw new Error("Script is required");
+    if (!presenterImageUrl?.trim()) throw new Error("Presenter image URL is required");
+
+    const config = { script, presenterImageUrl, voiceId };
+    const id = createId();
+
+    await db.insert(mediaJobs).values({
+      id,
+      workspaceId: session.workspaceId,
+      type: "avatar_video",
+      prompt: title,
+      provider: "did",
+      config: JSON.stringify(config),
+      status: "queued",
+      createdBy: session.userId,
+      createdAt: new Date(),
+    });
+
+    return { jobId: id, status: "queued" };
   });
 }

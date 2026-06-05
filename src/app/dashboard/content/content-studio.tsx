@@ -28,6 +28,7 @@ import {
 } from "./actions";
 import { listVoiceProfiles } from "@/app/dashboard/media/voice-actions";
 import { DOCTRINE_MODES } from "@/lib/ai/doctrine";
+import { MediaStudio } from "@/app/dashboard/media/media-studio";
 
 // ─── Steps ───
 type CreateStep = "configure" | "generating" | "review";
@@ -135,7 +136,10 @@ interface VoiceProfile {
 
 // ─── Main Component ───
 
+type StudioMode = "write" | "video";
+
 export function ContentStudio() {
+  const [mode, setMode] = useState<StudioMode>("write");
   const [step, setStep] = useState<CreateStep>("configure");
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [platformTypes, setPlatformTypes] = useState<Record<string, string>>({});
@@ -319,10 +323,39 @@ export function ContentStudio() {
     setAutonomousResult(null);
   }
 
+  // ─── Mode Toggle (Write / Video) ───
+  const modeToggle = (
+    <div className="flex rounded-lg border border-border bg-muted/30 p-1 gap-1 w-fit">
+      <button
+        onClick={() => setMode("write")}
+        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mode === "write" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+      >
+        <PenSquare className="w-3.5 h-3.5 inline mr-1.5" />Write
+      </button>
+      <button
+        onClick={() => setMode("video")}
+        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mode === "video" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+      >
+        <Video className="w-3.5 h-3.5 inline mr-1.5" />Video
+      </button>
+    </div>
+  );
+
+  // ─── Video Mode ───
+  if (mode === "video") {
+    return (
+      <div className="space-y-5">
+        {modeToggle}
+        <MediaStudio showSchedule />
+      </div>
+    );
+  }
+
   // ─── Configure Step ───
   if (step === "configure") {
     return (
       <div className="space-y-5">
+        {modeToggle}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}

@@ -20,12 +20,64 @@ import {
 import { createMediaJob, listMediaJobs } from "./actions";
 import { listVoiceProfiles } from "./voice-actions";
 import {
-  REUNION_VOICE_PRESETS,
   generateVideoScript,
   createVoiceoverVideoJob,
   listMediaJobs as listVideoJobs,
+  scheduleVideoPost,
+  scheduleImagePost,
+  scheduleCarouselPost,
+  generateCarouselSlides,
+  createCarouselJob,
+  createAvatarJob,
+  type CarouselSlide,
 } from "./video-studio-actions";
 import type { MediaJob } from "@/lib/db/schema";
+
+// Defined here (not imported from server actions file) so they're available on the client
+const REUNION_VOICE_PRESETS = [
+  {
+    id: "21m00Tcm4TlvDq8ikWAM",
+    name: "Rachel",
+    description: "Calm, clear, warm — perfect for family storytelling",
+    gender: "female",
+    recommended: true,
+  },
+  {
+    id: "ErXwobaYiN019PkySvjV",
+    name: "Antoni",
+    description: "Well-rounded, natural, trustworthy — great for advice content",
+    gender: "male",
+    recommended: true,
+  },
+  {
+    id: "TxGEqnHWrfWFTfGW9XjX",
+    name: "Josh",
+    description: "Deep, confident, warm — strong for motivational content",
+    gender: "male",
+    recommended: false,
+  },
+  {
+    id: "AZnzlk1XvdvUeBnXmlld",
+    name: "Domi",
+    description: "Strong, engaging, energetic — good for challenge/activity posts",
+    gender: "female",
+    recommended: false,
+  },
+  {
+    id: "MF3mGyEYCl7XYWbV9V6O",
+    name: "Elli",
+    description: "Young, bright, approachable — great for humor and relatable content",
+    gender: "female",
+    recommended: false,
+  },
+  {
+    id: "pNInz6obpgDQGcFmaJgB",
+    name: "Adam",
+    description: "Neutral, professional, clear — versatile for any content",
+    gender: "male",
+    recommended: false,
+  },
+] as const;
 
 const IMAGE_TYPES = [
   { value: "meme", label: "Meme", description: "Top/bottom text on template" },
@@ -66,10 +118,20 @@ interface VoiceProfile {
   isFounderVoice: boolean | null;
 }
 
-type TabType = "image" | "video";
+type TabType = "image" | "video" | "carousel" | "avatar";
 type VideoStep = 1 | 2 | 3;
 
-export function MediaStudio() {
+const VIDEO_PLATFORMS = [
+  { value: "instagram", label: "Instagram", icon: "📸" },
+  { value: "facebook", label: "Facebook", icon: "📘" },
+  { value: "threads", label: "Threads", icon: "🧵" },
+  { value: "x", label: "X", icon: "𝕏" },
+  { value: "linkedin", label: "LinkedIn", icon: "💼" },
+  { value: "youtube", label: "YouTube", icon: "▶️" },
+  { value: "tiktok", label: "TikTok", icon: "🎵" },
+];
+
+export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }) {
   const [activeTab, setActiveTab] = useState<TabType>("video");
   const [isPending, startTransition] = useTransition();
 
@@ -84,8 +146,8 @@ export function MediaStudio() {
   const [videoScript, setVideoScript] = useState("");
   const [videoTitle, setVideoTitle] = useState("");
   const [videoImagePrompts, setVideoImagePrompts] = useState<string[]>([]);
-  const [selectedVoiceId, setSelectedVoiceId] = useState(REUNION_VOICE_PRESETS[0]!.id);
-  const [selectedVoiceName, setSelectedVoiceName] = useState(REUNION_VOICE_PRESETS[0]!.name);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>(REUNION_VOICE_PRESETS[0]!.id);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>(REUNION_VOICE_PRESETS[0]!.name);
   const [videoFormat, setVideoFormat] = useState<"vertical" | "square" | "horizontal">("vertical");
   const [contentPillar, setContentPillar] = useState("family_connection");
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -95,17 +157,46 @@ export function MediaStudio() {
   const [status, setStatus] = useState<"idle" | "submitting" | "queued" | "error">("idle");
   const [error, setError] = useState("");
   const [recentJobs, setRecentJobs] = useState<MediaJob[]>([]);
+
+  // Schedule state (shown when showSchedule=true and a video is completed)
+  const [schedulingJobId, setSchedulingJobId] = useState<string | null>(null);
+  const [scheduleCaption, setScheduleCaption] = useState("");
+  const [schedulePlatforms, setSchedulePlatforms] = useState<string[]>(["instagram", "facebook", "threads"]);
+  const [scheduleTime, setScheduleTime] = useState("");
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleResult, setScheduleResult] = useState<{ scheduled: number; skipped: string[] } | null>(null);
   const [voiceProfiles, setVoiceProfiles] = useState<VoiceProfile[]>([]);
 
+  // Carousel state
+  const [carouselTopic, setCarouselTopic] = useState("");
+  const [carouselSlideCount, setCarouselSlideCount] = useState(5);
+  const [carouselPillar, setCarouselPillar] = useState("family_connection");
+  const [carouselSlides, setCarouselSlides] = useState<Array<{slideNumber: number; headline: string; body: string; imagePrompt: string}>>([]);
+  const [carouselCaption, setCarouselCaption] = useState("");
+  const [carouselTitle, setCarouselTitle] = useState("");
+  const [generatingCarousel, setGeneratingCarousel] = useState(false);
+  const [carouselJobs, setCarouselJobs] = useState<MediaJob[]>([]);
+
+  // Avatar (D-ID) state
+  const [avatarScript, setAvatarScript] = useState("");
+  const [avatarImageUrl, setAvatarImageUrl] = useState("");
+  const [avatarVoiceId, setAvatarVoiceId] = useState<string>(REUNION_VOICE_PRESETS[0]!.id);
+  const [avatarTitle, setAvatarTitle] = useState("");
+  const [avatarJobs, setAvatarJobs] = useState<MediaJob[]>([]);
+
   const loadData = useCallback(async () => {
-    const [jobsResult, voicesResult, videoJobsResult] = await Promise.all([
+    const [jobsResult, voicesResult, videoJobsResult, carouselJobsResult, avatarJobsResult] = await Promise.all([
       listMediaJobs(),
       listVoiceProfiles(),
       listVideoJobs("video_composite"),
+      listVideoJobs("carousel"),
+      listVideoJobs("avatar_video" as "video_composite"),
     ]);
     if (jobsResult.success) setRecentJobs(jobsResult.data.slice(0, 10));
     if (voicesResult.success) setVoiceProfiles(voicesResult.data);
     if (videoJobsResult.success) setVideoJobs(videoJobsResult.data);
+    if (carouselJobsResult.success) setCarouselJobs(carouselJobsResult.data);
+    if (avatarJobsResult.success) setAvatarJobs(avatarJobsResult.data.filter(j => j.type === "avatar_video"));
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -153,21 +244,26 @@ export function MediaStudio() {
     setError("");
     setGeneratingScript(true);
     startTransition(async () => {
-      const fd = new FormData();
-      fd.set("topic", videoTopic);
-      fd.set("format", videoFormat);
-      fd.set("contentPillar", contentPillar);
-      fd.set("targetDurationSeconds", "45");
-      const result = await generateVideoScript(fd);
-      if (result.success) {
-        setVideoScript(result.data.script);
-        setVideoTitle(result.data.title);
-        setVideoImagePrompts(result.data.imagePrompts);
-        setVideoStep(2);
-      } else {
-        setError(result.error ?? "Script generation failed");
+      try {
+        const fd = new FormData();
+        fd.set("topic", videoTopic);
+        fd.set("format", videoFormat);
+        fd.set("contentPillar", contentPillar);
+        fd.set("targetDurationSeconds", "45");
+        const result = await generateVideoScript(fd);
+        if (result.success) {
+          setVideoScript(result.data.script);
+          setVideoTitle(result.data.title);
+          setVideoImagePrompts(result.data.imagePrompts);
+          setVideoStep(2);
+        } else {
+          setError(result.error ?? "Script generation failed");
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Script generation failed — please try again");
+      } finally {
+        setGeneratingScript(false);
       }
-      setGeneratingScript(false);
     });
   }
 
@@ -186,17 +282,22 @@ export function MediaStudio() {
     fd.set("imagePrompts", JSON.stringify(videoImagePrompts));
 
     startTransition(async () => {
-      const result = await createVoiceoverVideoJob(fd);
-      if (!result.success) {
-        setError(result.error ?? "Failed to queue video");
+      try {
+        const result = await createVoiceoverVideoJob(fd);
+        if (!result.success) {
+          setError(result.error ?? "Failed to queue video");
+          setStatus("error");
+        } else {
+          setStatus("queued");
+          setVideoStep(1);
+          setVideoTopic("");
+          setVideoScript("");
+          setVideoTitle("");
+          setTimeout(() => { setStatus("idle"); void loadData(); }, 3000);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to queue video — please try again");
         setStatus("error");
-      } else {
-        setStatus("queued");
-        setVideoStep(1);
-        setVideoTopic("");
-        setVideoScript("");
-        setVideoTitle("");
-        setTimeout(() => { setStatus("idle"); loadData(); }, 3000);
       }
     });
   }
@@ -221,31 +322,182 @@ export function MediaStudio() {
     <div className="space-y-6">
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
-        <button
-          onClick={() => setActiveTab("image")}
-          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === "image"
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <ImagePlus className="w-4 h-4" /> Image
+        <button onClick={() => setActiveTab("video")}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === "video" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <Video className="w-4 h-4" /> Video
         </button>
-        <button
-          onClick={() => setActiveTab("video")}
-          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            activeTab === "video"
-              ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <Video className="w-4 h-4" /> Video Composite
+        <button onClick={() => setActiveTab("carousel")}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === "carousel" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <Palette className="w-4 h-4" /> Carousel
+        </button>
+        <button onClick={() => setActiveTab("avatar")}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === "avatar" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <Mic className="w-4 h-4" /> Avatar
+        </button>
+        <button onClick={() => setActiveTab("image")}
+          className={`inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-md transition-colors ${activeTab === "image" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <ImagePlus className="w-4 h-4" /> Image
         </button>
       </div>
 
       {error && (
         <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
           {error}
+        </div>
+      )}
+
+      {/* ─── Avatar Tab (D-ID) ─── */}
+      {activeTab === "avatar" && (
+        <div className="space-y-5">
+          <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Video title</label>
+              <input value={avatarTitle} onChange={e => setAvatarTitle(e.target.value)}
+                placeholder="e.g. Why family traditions matter"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Presenter image URL</label>
+              <input value={avatarImageUrl} onChange={e => setAvatarImageUrl(e.target.value)}
+                placeholder="https://... (publicly accessible photo of the presenter)"
+                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+              <p className="text-xs text-muted-foreground mt-1">Upload a photo to R2 or use any public image URL. Face should be clearly visible, front-facing.</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Script</label>
+              <textarea value={avatarScript} onChange={e => setAvatarScript(e.target.value)}
+                placeholder="Write what the avatar will say…"
+                rows={5}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+              <p className="text-xs text-muted-foreground mt-1">~130 words = 60 seconds</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Voice (ElevenLabs)</label>
+              <div className="grid grid-cols-2 gap-2">
+                {REUNION_VOICE_PRESETS.map(v => (
+                  <button key={v.id} onClick={() => setAvatarVoiceId(v.id)}
+                    className={`rounded-lg border p-2.5 text-left transition-colors ${avatarVoiceId === v.id ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border bg-background hover:border-primary/40"}`}>
+                    <p className="text-sm font-medium">{v.name}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{v.description}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              disabled={!avatarScript.trim() || !avatarImageUrl.trim() || isPending}
+              onClick={() => {
+                const fd = new FormData();
+                fd.set("script", avatarScript);
+                fd.set("presenterImageUrl", avatarImageUrl);
+                fd.set("voiceId", avatarVoiceId);
+                fd.set("title", avatarTitle || avatarScript.substring(0, 50));
+                startTransition(async () => {
+                  try {
+                    const res = await createAvatarJob(fd);
+                    if (res.success) {
+                      setAvatarScript("");
+                      setAvatarTitle("");
+                      void loadData();
+                    } else setError(res.error ?? "Failed to queue avatar job");
+                  } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
+                });
+              }}
+              className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {isPending ? "Queuing…" : "Generate Avatar Video"}
+            </button>
+          </div>
+
+          {/* Avatar Jobs Library */}
+          {avatarJobs.length > 0 && (
+            <div className="space-y-3 pt-2 border-t border-border">
+              <h3 className="text-sm font-semibold">Avatar Library</h3>
+              <div className="space-y-2">
+                {avatarJobs.map(job => (
+                  <div key={job.id} className="rounded-xl border border-border bg-card p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{job.prompt}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {job.status === "queued" ? "⏳ Queued"
+                           : job.status === "processing" ? "🎭 D-ID rendering…"
+                           : job.status === "completed" ? "✅ Ready"
+                           : `❌ ${job.errorMessage ?? "Failed"}`}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        {(job.status === "queued" || job.status === "processing") && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
+                        {job.status === "completed" && job.resultR2Key && (
+                          <>
+                            <a href={`/api/media/serve/${job.resultR2Key}`} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-md bg-muted border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted/80">
+                              <Play className="w-3 h-3" /> Play
+                            </a>
+                            {showSchedule && (
+                              <button onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                                className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
+                                <Send className="w-3 h-3" /> Schedule
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {/* Schedule panel reuses video scheduling (same mediaType: video) */}
+                    {showSchedule && schedulingJobId === job.id && !scheduleResult && (
+                      <div className="pt-2 border-t border-border space-y-3">
+                        <textarea value={scheduleCaption} onChange={e => setScheduleCaption(e.target.value)}
+                          placeholder="Caption…" rows={2}
+                          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+                        <div className="flex flex-wrap gap-2">
+                          {VIDEO_PLATFORMS.map(p => (
+                            <button key={p.value}
+                              onClick={() => setSchedulePlatforms(prev => prev.includes(p.value) ? prev.filter(x => x !== p.value) : [...prev, p.value])}
+                              className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${schedulePlatforms.includes(p.value) ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40"}`}>
+                              {p.icon} {p.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                          <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
+                          <button
+                            disabled={scheduling || !scheduleCaption.trim() || !schedulePlatforms.length || !scheduleTime}
+                            onClick={() => {
+                              setScheduling(true);
+                              const fd = new FormData();
+                              fd.set("jobId", job.id);
+                              fd.set("caption", scheduleCaption);
+                              fd.set("scheduledFor", new Date(scheduleTime).toISOString());
+                              fd.set("platforms", JSON.stringify(schedulePlatforms));
+                              scheduleVideoPost(fd).then(res => {
+                                if (res.success) setScheduleResult(res.data);
+                                else setError(res.error ?? "Scheduling failed");
+                              }).catch(e => setError(e instanceof Error ? e.message : "Failed"))
+                              .finally(() => setScheduling(false));
+                            }}
+                            className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-xs font-medium disabled:opacity-50 hover:bg-primary/90">
+                            {scheduling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                            {scheduling ? "Scheduling…" : "Schedule"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {showSchedule && schedulingJobId === job.id && scheduleResult && (
+                      <p className="text-xs text-green-700 font-medium pt-2 border-t border-border">
+                        ✅ Scheduled to {scheduleResult.scheduled} platform{scheduleResult.scheduled !== 1 ? "s" : ""}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -307,6 +559,202 @@ export function MediaStudio() {
               <><ImagePlus className="h-4 w-4" /> Generate Image</>
             )}
           </button>
+        </div>
+      )}
+
+      {/* ─── Carousel Tab ─── */}
+      {activeTab === "carousel" && (
+        <div className="space-y-5">
+          {carouselSlides.length === 0 ? (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-1.5">Topic</label>
+                <input value={carouselTopic} onChange={e => setCarouselTopic(e.target.value)}
+                  placeholder="e.g. 5 ways to start a family tradition"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-foreground mb-1.5">Slides</label>
+                  <select value={carouselSlideCount} onChange={e => setCarouselSlideCount(parseInt(e.target.value))}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                    {[3,4,5,6,7].map(n => <option key={n} value={n}>{n} slides</option>)}
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-foreground mb-1.5">Content pillar</label>
+                  <select value={carouselPillar} onChange={e => setCarouselPillar(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
+                    <option value="family_connection">Family Connection</option>
+                    <option value="legacy_memory">Legacy & Memory</option>
+                    <option value="engagement">Engagement</option>
+                    <option value="humor">Humor</option>
+                    <option value="product_awareness">Reunion App</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!carouselTopic.trim()) return;
+                  setGeneratingCarousel(true);
+                  const fd = new FormData();
+                  fd.set("topic", carouselTopic);
+                  fd.set("slideCount", String(carouselSlideCount));
+                  fd.set("contentPillar", carouselPillar);
+                  startTransition(async () => {
+                    try {
+                      const res = await generateCarouselSlides(fd);
+                      if (res.success) {
+                        setCarouselSlides(res.data.slides);
+                        setCarouselCaption(res.data.caption);
+                        setCarouselTitle(res.data.title);
+                      } else setError(res.error ?? "Failed to generate carousel");
+                    } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
+                    finally { setGeneratingCarousel(false); }
+                  });
+                }}
+                disabled={!carouselTopic.trim() || generatingCarousel || isPending}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+                {generatingCarousel ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+                {generatingCarousel ? "Writing slides…" : "AI Write Carousel"}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">{carouselTitle}</h3>
+                <button onClick={() => setCarouselSlides([])} className="text-xs text-muted-foreground hover:text-foreground">← Start over</button>
+              </div>
+
+              {/* Slide previews */}
+              <div className="space-y-2">
+                {carouselSlides.map((slide, i) => (
+                  <div key={i} className="rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-start gap-3">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center">{slide.slideNumber}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold">{slide.headline}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{slide.body}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Caption */}
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Caption</label>
+                <textarea value={carouselCaption} onChange={e => setCarouselCaption(e.target.value)} rows={3}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+              </div>
+
+              <button
+                onClick={() => {
+                  const fd = new FormData();
+                  fd.set("slides", JSON.stringify(carouselSlides));
+                  fd.set("caption", carouselCaption);
+                  fd.set("title", carouselTitle);
+                  startTransition(async () => {
+                    try {
+                      const res = await createCarouselJob(fd);
+                      if (res.success) {
+                        setCarouselSlides([]);
+                        setCarouselTopic("");
+                        void loadData();
+                      } else setError(res.error ?? "Failed to queue carousel");
+                    } catch (e) { setError(e instanceof Error ? e.message : "Failed"); }
+                  });
+                }}
+                disabled={isPending}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-primary/90">
+                {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {isPending ? "Queuing…" : "Generate Carousel"}
+              </button>
+            </div>
+          )}
+
+          {/* Carousel Jobs Library */}
+          {carouselJobs.length > 0 && (
+            <div className="space-y-3 pt-2 border-t border-border">
+              <h3 className="text-sm font-semibold">Carousel Library</h3>
+              <div className="space-y-2">
+                {carouselJobs.map(job => (
+                  <div key={job.id} className="rounded-xl border border-border bg-card p-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">{job.prompt}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {job.status === "queued" ? "⏳ Queued"
+                           : job.status === "processing" ? "🎨 Rendering slides…"
+                           : job.status === "completed" ? "✅ Ready"
+                           : `❌ ${job.errorMessage ?? "Failed"}`}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        {(job.status === "queued" || job.status === "processing") && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
+                        {job.status === "completed" && showSchedule && (
+                          <button onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
+                            <Send className="w-3 h-3" /> Schedule
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {showSchedule && schedulingJobId === job.id && !scheduleResult && (
+                      <div className="pt-2 border-t border-border space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">Caption</label>
+                          <textarea value={scheduleCaption} onChange={e => setScheduleCaption(e.target.value)}
+                            placeholder="Caption for this carousel…" rows={2}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {[{ value: "instagram", label: "Instagram", icon: "📸" }].map(p => (
+                            <button key={p.value}
+                              onClick={() => setSchedulePlatforms(prev => prev.includes(p.value) ? prev.filter(x => x !== p.value) : [...prev, p.value])}
+                              className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${schedulePlatforms.includes(p.value) ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40"}`}>
+                              {p.icon} {p.label}
+                            </button>
+                          ))}
+                          <p className="text-xs text-muted-foreground self-center">Carousel publishing currently supports Instagram only</p>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                          <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
+                          <button
+                            disabled={scheduling || !scheduleCaption.trim() || !schedulePlatforms.length || !scheduleTime}
+                            onClick={() => {
+                              setScheduling(true);
+                              const fd = new FormData();
+                              fd.set("jobId", job.id);
+                              fd.set("caption", scheduleCaption);
+                              fd.set("scheduledFor", new Date(scheduleTime).toISOString());
+                              fd.set("platforms", JSON.stringify(schedulePlatforms.filter(p => p === "instagram")));
+                              scheduleCarouselPost(fd).then(res => {
+                                if (res.success) setScheduleResult(res.data);
+                                else setError(res.error ?? "Scheduling failed");
+                              }).catch(e => setError(e instanceof Error ? e.message : "Scheduling failed"))
+                              .finally(() => setScheduling(false));
+                            }}
+                            className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-xs font-medium disabled:opacity-50 hover:bg-primary/90">
+                            {scheduling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                            {scheduling ? "Scheduling…" : "Schedule"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {showSchedule && schedulingJobId === job.id && scheduleResult && (
+                      <p className="text-xs text-green-700 font-medium pt-2 border-t border-border">
+                        ✅ Scheduled to {scheduleResult.scheduled} platform{scheduleResult.scheduled !== 1 ? "s" : ""}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -504,20 +952,84 @@ export function MediaStudio() {
                         {(job.status === "queued" || job.status === "processing") && (
                           <Loader2 className="w-4 h-4 text-primary animate-spin" />
                         )}
-                        {job.status === "completed" && job.outputUrl && (
+                        {job.status === "completed" && job.resultR2Key && (
                           <>
-                            <a href={job.outputUrl} target="_blank" rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
+                            <a href={`/api/media/serve/${job.resultR2Key}`} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 rounded-md bg-muted border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted/80">
                               <Play className="w-3 h-3" /> Play
                             </a>
-                            <a href={job.outputUrl} download
-                              className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted">
-                              <Download className="w-3 h-3" /> Save
-                            </a>
+                            {showSchedule && (
+                              <button
+                                onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                                className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
+                                <Send className="w-3 h-3" /> Schedule
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
                     </div>
+
+                    {/* Inline schedule panel */}
+                    {showSchedule && schedulingJobId === job.id && !scheduleResult && (
+                      <div className="mt-3 pt-3 border-t border-border space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">Caption / description</label>
+                          <textarea value={scheduleCaption} onChange={e => setScheduleCaption(e.target.value)}
+                            placeholder="Write a caption for this video…"
+                            rows={3}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">Platforms</label>
+                          <div className="flex flex-wrap gap-2">
+                            {VIDEO_PLATFORMS.map(p => (
+                              <button key={p.value}
+                                onClick={() => setSchedulePlatforms(prev => prev.includes(p.value) ? prev.filter(x => x !== p.value) : [...prev, p.value])}
+                                className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${schedulePlatforms.includes(p.value) ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40"}`}>
+                                {p.icon} {p.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground block mb-1">Schedule for</label>
+                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                            className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
+                          <button
+                            disabled={scheduling || !scheduleCaption.trim() || !schedulePlatforms.length || !scheduleTime}
+                            onClick={() => {
+                              setScheduling(true);
+                              const fd = new FormData();
+                              fd.set("jobId", job.id);
+                              fd.set("caption", scheduleCaption);
+                              fd.set("scheduledFor", new Date(scheduleTime).toISOString());
+                              fd.set("platforms", JSON.stringify(schedulePlatforms));
+                              scheduleVideoPost(fd).then(res => {
+                                if (res.success) setScheduleResult(res.data);
+                                else setError(res.error ?? "Scheduling failed");
+                              }).catch(e => setError(e instanceof Error ? e.message : "Scheduling failed"))
+                              .finally(() => setScheduling(false));
+                            }}
+                            className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-xs font-medium disabled:opacity-50 hover:bg-primary/90">
+                            {scheduling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                            {scheduling ? "Scheduling…" : `Schedule to ${schedulePlatforms.length} platform${schedulePlatforms.length !== 1 ? "s" : ""}`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {showSchedule && schedulingJobId === job.id && scheduleResult && (
+                      <div className="mt-3 pt-3 border-t border-border">
+                        <p className="text-sm text-green-700 font-medium">
+                          ✅ Scheduled to {scheduleResult.scheduled} platform{scheduleResult.scheduled !== 1 ? "s" : ""}
+                          {scheduleResult.skipped.length > 0 && ` (skipped: ${scheduleResult.skipped.join(", ")} — not connected)`}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -526,40 +1038,102 @@ export function MediaStudio() {
         </div>
       )}
 
-      {/* Recent Jobs */}
+      {/* Recent Image Jobs */}
       {recentJobs.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-foreground">Recent Jobs</h3>
+          <h3 className="text-sm font-semibold text-foreground">Recent Images</h3>
           <div className="space-y-2">
             {recentJobs.map((job) => (
-              <div
-                key={job.id}
-                className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <StatusIcon status={job.status} />
-                  <div>
-                    <p className="text-sm font-medium text-foreground capitalize">
-                      {job.type.replace(/_/g, " ")}
-                    </p>
-                    <p className="text-xs text-muted-foreground line-clamp-1 max-w-[300px]">
-                      {job.prompt}
-                    </p>
+              <div key={job.id} className="rounded-lg border border-border bg-card px-4 py-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <StatusIcon status={job.status} />
+                    <div>
+                      <p className="text-sm font-medium text-foreground capitalize">
+                        {job.type.replace(/_/g, " ")}
+                      </p>
+                      <p className="text-xs text-muted-foreground line-clamp-1 max-w-[240px]">
+                        {job.prompt}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {job.status === "completed" && job.resultR2Key && (
+                      <>
+                        <a href={`/api/media/serve/${job.resultR2Key}`} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-md bg-muted border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted/80">
+                          <Play className="w-3 h-3" /> View
+                        </a>
+                        {showSchedule && (
+                          <button
+                            onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                            className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
+                            <Send className="w-3 h-3" /> Schedule
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {job.status !== "completed" && (
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        job.status === "failed" ? "bg-destructive/10 text-destructive"
+                        : job.status === "processing" ? "bg-warning/10 text-warning"
+                        : "bg-muted text-muted-foreground"}`}>
+                        {job.status}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    job.status === "completed"
-                      ? "bg-success/10 text-success"
-                      : job.status === "failed"
-                      ? "bg-destructive/10 text-destructive"
-                      : job.status === "processing"
-                      ? "bg-warning/10 text-warning"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {job.status}
-                </span>
+
+                {/* Inline schedule panel for image jobs */}
+                {showSchedule && schedulingJobId === job.id && !scheduleResult && (
+                  <div className="pt-2 border-t border-border space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block mb-1">Caption</label>
+                      <textarea value={scheduleCaption} onChange={e => setScheduleCaption(e.target.value)}
+                        placeholder="Write a caption…" rows={2}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {VIDEO_PLATFORMS.map(p => (
+                        <button key={p.value}
+                          onClick={() => setSchedulePlatforms(prev => prev.includes(p.value) ? prev.filter(x => x !== p.value) : [...prev, p.value])}
+                          className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${schedulePlatforms.includes(p.value) ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/40"}`}>
+                          {p.icon} {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                        className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                      <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
+                      <button
+                        disabled={scheduling || !scheduleCaption.trim() || !schedulePlatforms.length || !scheduleTime}
+                        onClick={() => {
+                          setScheduling(true);
+                          const fd = new FormData();
+                          fd.set("jobId", job.id);
+                          fd.set("caption", scheduleCaption);
+                          fd.set("scheduledFor", new Date(scheduleTime).toISOString());
+                          fd.set("platforms", JSON.stringify(schedulePlatforms));
+                          scheduleImagePost(fd).then(res => {
+                            if (res.success) setScheduleResult(res.data);
+                            else setError(res.error ?? "Scheduling failed");
+                          }).catch(e => setError(e instanceof Error ? e.message : "Scheduling failed"))
+                          .finally(() => setScheduling(false));
+                        }}
+                        className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-xs font-medium disabled:opacity-50 hover:bg-primary/90">
+                        {scheduling ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                        {scheduling ? "Scheduling…" : "Schedule"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {showSchedule && schedulingJobId === job.id && scheduleResult && (
+                  <p className="text-xs text-green-700 font-medium pt-2 border-t border-border">
+                    ✅ Scheduled to {scheduleResult.scheduled} platform{scheduleResult.scheduled !== 1 ? "s" : ""}
+                    {scheduleResult.skipped.length > 0 && ` (skipped: ${scheduleResult.skipped.join(", ")})`}
+                  </p>
+                )}
               </div>
             ))}
           </div>

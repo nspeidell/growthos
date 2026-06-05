@@ -21,6 +21,7 @@
     "deploy:publisher": "wrangler deploy --config wrangler.publisher.toml",
     "deploy:automation-processor": "wrangler deploy --config wrangler.automation-processor.toml",
     "deploy:token-refresher": "wrangler deploy --config wrangler.token-refresher.toml",
+    "deploy:media-gen": "wrangler deploy --config wrangler.media-gen.toml",
     "ship": "git add -A && git commit -m \"update\" && git push && npm run deploy"
   },
   "dependencies": {

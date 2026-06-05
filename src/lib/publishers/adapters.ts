@@ -16,6 +16,9 @@ export interface PublishPayload {
   body: string;
   accessToken: string;
   metadata?: Record<string, unknown>;
+  // Video publishing
+  mediaUrl?: string;      // public URL of the video/image file (R2 public URL)
+  mediaType?: "video" | "image" | "carousel";
 }
 
 /**
@@ -25,6 +28,11 @@ export async function publishToplatform(
   platform: string,
   payload: PublishPayload
 ): Promise<PublishResult> {
+  // Carousel posts use a special multi-image flow for Instagram
+  if (payload.mediaType === "carousel" && platform === "instagram") {
+    return publishInstagramCarousel(payload);
+  }
+
   switch (platform) {
     case "instagram":
       return publishToInstagram(payload);
@@ -47,54 +55,137 @@ export async function publishToplatform(
   }
 }
 
-// ─── Instagram (via Instagram Business Login — graph.instagram.com) ───
+// ─── Instagram Carousel (CAROUSEL_ALBUM) ──────────────────────────────────────
 
-async function publishToInstagram(
-  payload: PublishPayload
-): Promise<PublishResult> {
-  const { body, accessToken, metadata } = payload;
-  const imageUrl = metadata?.imageUrl as string | undefined;
-  // Stored during OAuth connect via Instagram Business Login (graph.instagram.com/me)
+async function publishInstagramCarousel(payload: PublishPayload): Promise<PublishResult> {
+  const { body, accessToken, metadata, mediaUrl } = payload;
   const igUserId = metadata?._platformAccountId as string | undefined;
+  if (!igUserId) throw new Error("Instagram carousel requires platform_account_id");
+  if (!mediaUrl) throw new Error("Instagram carousel requires mediaUrl (manifest URL)");
 
-  if (!igUserId) {
-    throw new Error(
-      "Instagram publish requires platform_account_id — reconnect the Instagram account"
+  // Fetch the carousel manifest to get slide URLs
+  const manifestResp = await fetch(mediaUrl);
+  if (!manifestResp.ok) throw new Error(`Failed to fetch carousel manifest: ${manifestResp.status}`);
+  const manifest = await manifestResp.json() as { slideUrls: string[]; caption?: string };
+  const slideUrls = manifest.slideUrls ?? [];
+  if (!slideUrls.length) throw new Error("Carousel manifest has no slides");
+
+  // Step 1: Create a child media container for each slide
+  const childIds: string[] = [];
+  for (const imageUrl of slideUrls) {
+    const childRes = await fetch(
+      `https://graph.instagram.com/v21.0/${igUserId}/media`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_url: imageUrl, is_carousel_item: true, access_token: accessToken }),
+      }
     );
+    if (!childRes.ok) throw new Error(`Instagram carousel child creation failed: ${await childRes.text()}`);
+    const child = await childRes.json() as { id?: string };
+    if (!child.id) throw new Error("Carousel child missing id");
+    childIds.push(child.id);
   }
 
-  if (!imageUrl) {
-    throw new Error(
-      "Instagram requires an image — attach media to this content"
-    );
-  }
-
-  // Step 1: Create media container (Instagram Business Login uses graph.instagram.com)
+  // Step 2: Create the carousel container
   const containerRes = await fetch(
     `https://graph.instagram.com/v21.0/${igUserId}/media`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        image_url: imageUrl,
+        media_type: "CAROUSEL",
+        children: childIds.join(","),
         caption: body,
         access_token: accessToken,
       }),
     }
   );
+  if (!containerRes.ok) throw new Error(`Instagram carousel container failed: ${await containerRes.text()}`);
+  const container = await containerRes.json() as { id?: string };
+  if (!container.id) throw new Error("Carousel container missing id");
+
+  // Step 3: Publish
+  const publishRes = await fetch(
+    `https://graph.instagram.com/v21.0/${igUserId}/media_publish`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ creation_id: container.id, access_token: accessToken }),
+    }
+  );
+  if (!publishRes.ok) throw new Error(`Instagram carousel publish failed: ${await publishRes.text()}`);
+  const published = await publishRes.json() as { id?: string };
+
+  return {
+    platformPostId: published.id ?? container.id,
+    platformPostUrl: `https://www.instagram.com/p/${published.id ?? container.id}/`,
+  };
+}
+
+// ─── Instagram (via Instagram Business Login — graph.instagram.com) ───
+
+async function publishToInstagram(
+  payload: PublishPayload
+): Promise<PublishResult> {
+  const { body, accessToken, metadata, mediaUrl, mediaType } = payload;
+  const imageUrl = (mediaType === "image" ? mediaUrl : undefined) ?? metadata?.imageUrl as string | undefined;
+  const videoUrl = (mediaType === "video" ? mediaUrl : undefined) ?? metadata?.videoUrl as string | undefined;
+  const igUserId = metadata?._platformAccountId as string | undefined;
+
+  if (!igUserId) {
+    throw new Error("Instagram publish requires platform_account_id — reconnect the Instagram account");
+  }
+
+  if (!imageUrl && !videoUrl) {
+    throw new Error("Instagram requires an image or video — attach media to this content");
+  }
+
+  // Step 1: Create media container
+  const containerBody: Record<string, unknown> = {
+    caption: body,
+    access_token: accessToken,
+  };
+
+  if (videoUrl) {
+    // Reel
+    containerBody.media_type = "REELS";
+    containerBody.video_url = videoUrl;
+    containerBody.share_to_feed = true;
+  } else {
+    containerBody.image_url = imageUrl;
+  }
+
+  const containerRes = await fetch(
+    `https://graph.instagram.com/v21.0/${igUserId}/media`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(containerBody),
+    }
+  );
 
   if (!containerRes.ok) {
     const err = await containerRes.text();
-    throw new Error(
-      `Instagram media container creation failed (${containerRes.status}): ${err}`
-    );
+    throw new Error(`Instagram media container creation failed (${containerRes.status}): ${err}`);
   }
 
   const container = await containerRes.json() as { id?: string; error?: { message: string } };
-  if (!container.id) {
-    throw new Error(
-      `Instagram container missing id: ${JSON.stringify(container)}`
-    );
+  if (!container.id) throw new Error(`Instagram container missing id: ${JSON.stringify(container)}`);
+
+  // Step 1b: For Reels, poll until processing is complete (up to 2 min)
+  if (videoUrl) {
+    let attempts = 0;
+    while (attempts < 24) {
+      await new Promise(r => setTimeout(r, 5000));
+      const statusRes = await fetch(
+        `https://graph.instagram.com/v21.0/${container.id}?fields=status_code&access_token=${accessToken}`
+      );
+      const status = await statusRes.json() as { status_code?: string };
+      if (status.status_code === "FINISHED") break;
+      if (status.status_code === "ERROR") throw new Error("Instagram Reel processing failed");
+      attempts++;
+    }
   }
 
   // Step 2: Publish the container
@@ -103,10 +194,7 @@ async function publishToInstagram(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        creation_id: container.id,
-        access_token: accessToken,
-      }),
+      body: JSON.stringify({ creation_id: container.id, access_token: accessToken }),
     }
   );
 
@@ -170,6 +258,31 @@ async function publishToFacebook(
     throw new Error(
       `No Facebook Page found — /me/accounts returned empty and no fallback page ID is configured. Raw: ${pagesBody.substring(0, 300)}`
     );
+  }
+
+  // Video (Reel) post
+  if (payload.mediaType === "video" && payload.mediaUrl) {
+    const videoRes = await fetch(
+      `https://graph.facebook.com/v21.0/${page.id}/videos`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          file_url: payload.mediaUrl,
+          description: body,
+          access_token: page.access_token,
+        }),
+      }
+    );
+    if (!videoRes.ok) {
+      const err = await videoRes.text();
+      throw new Error(`Facebook video publish failed: ${err}`);
+    }
+    const videoData = await videoRes.json() as { id: string };
+    return {
+      platformPostId: videoData.id,
+      platformPostUrl: `https://www.facebook.com/${page.id}/videos/${videoData.id}`,
+    };
   }
 
   const res = await fetch(
@@ -330,15 +443,22 @@ async function publishToThreads(payload: PublishPayload): Promise<PublishResult>
     throw new Error("Threads publish requires platform_account_id — reconnect the Threads account");
   }
 
-  // Step 1: Create a text-only media container
+  const videoUrl = payload.mediaType === "video" ? payload.mediaUrl : undefined;
+
+  // Step 1: Create media container (text or video)
   const containerRes = await fetch(
     `https://graph.threads.net/v1.0/${userId}/threads`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(videoUrl ? {
+        media_type: "VIDEO",
+        video_url: videoUrl,
+        text: body.substring(0, 500),
+        access_token: accessToken,
+      } : {
         media_type: "TEXT",
-        text: body.substring(0, 500), // Threads limit
+        text: body.substring(0, 500),
         access_token: accessToken,
       }),
     }

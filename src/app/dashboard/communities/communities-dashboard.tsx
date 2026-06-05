@@ -908,7 +908,7 @@ export default function CommunitiesDashboard() {
                                 )}
                                 {/* Mark Posted */}
                                 <button
-                                  onClick={() => handlePublish(post.id).then(load)}
+                                  onClick={() => { void handlePublish(post.id); void load(); }}
                                   disabled={isPending}
                                   className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
                                 >
