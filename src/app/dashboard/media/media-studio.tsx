@@ -29,6 +29,7 @@ import {
   generateCarouselSlides,
   createCarouselJob,
   createAvatarJob,
+  generateVideoCaption,
   type CarouselSlide,
 } from "./video-studio-actions";
 import type { MediaJob } from "@/lib/db/schema";
@@ -187,6 +188,21 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
   // Inline video player — avoids navigating to the raw /api/media/serve endpoint
   // (which returns JSON on any 404/auth hiccup). The <video> element loads/retries gracefully.
   const [playingUrl, setPlayingUrl] = useState<string | null>(null);
+
+  // AI-written caption loading state for the schedule modal
+  const [captionLoading, setCaptionLoading] = useState(false);
+
+  // Open the schedule panel for a job and auto-write its caption with AI.
+  function openSchedule(jobId: string) {
+    setSchedulingJobId(jobId);
+    setScheduleCaption("");
+    setScheduleResult(null);
+    setCaptionLoading(true);
+    generateVideoCaption(jobId)
+      .then((res) => { if (res.success) setScheduleCaption(res.data.caption); })
+      .catch(() => { /* leave blank on failure — user can type their own */ })
+      .finally(() => setCaptionLoading(false));
+  }
 
   const loadData = useCallback(async () => {
     const [jobsResult, voicesResult, videoJobsResult, carouselJobsResult, avatarJobsResult] = await Promise.all([
@@ -465,7 +481,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                               <Play className="w-3 h-3" /> Play
                             </button>
                             {showSchedule && (
-                              <button onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                              <button onClick={() => openSchedule(job.id)}
                                 className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
                                 <Send className="w-3 h-3" /> Schedule
                               </button>
@@ -478,7 +494,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                     {showSchedule && schedulingJobId === job.id && !scheduleResult && (
                       <div className="pt-2 border-t border-border space-y-3">
                         <textarea value={scheduleCaption} onChange={e => setScheduleCaption(e.target.value)}
-                          placeholder="Caption…" rows={2}
+                          placeholder={captionLoading ? "✍️ Writing caption with AI…" : "Caption…"} rows={2}
                           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
                         <div className="flex flex-wrap gap-2">
                           {VIDEO_PLATFORMS.map(p => (
@@ -490,7 +506,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                           ))}
                         </div>
                         <div className="flex gap-2 items-center">
-                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} style={{ colorScheme: "dark" }}
                             className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                           <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
                           <button
@@ -720,7 +736,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                       <div className="flex gap-2 flex-shrink-0">
                         {(job.status === "queued" || job.status === "processing") && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
                         {job.status === "completed" && showSchedule && (
-                          <button onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                          <button onClick={() => openSchedule(job.id)}
                             className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
                             <Send className="w-3 h-3" /> Schedule
                           </button>
@@ -747,7 +763,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                           <p className="text-xs text-muted-foreground self-center">Carousel publishing currently supports Instagram only</p>
                         </div>
                         <div className="flex gap-2 items-center">
-                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} style={{ colorScheme: "dark" }}
                             className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                           <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
                           <button
@@ -987,7 +1003,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                             </button>
                             {showSchedule && (
                               <button
-                                onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                                onClick={() => openSchedule(job.id)}
                                 className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
                                 <Send className="w-3 h-3" /> Schedule
                               </button>
@@ -1021,7 +1037,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                         </div>
                         <div>
                           <label className="text-xs font-medium text-muted-foreground block mb-1">Schedule for</label>
-                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                          <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} style={{ colorScheme: "dark" }}
                             className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                         </div>
                         <div className="flex gap-2">
@@ -1093,7 +1109,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                         </a>
                         {showSchedule && (
                           <button
-                            onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
+                            onClick={() => openSchedule(job.id)}
                             className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
                             <Send className="w-3 h-3" /> Schedule
                           </button>
@@ -1130,7 +1146,7 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                       ))}
                     </div>
                     <div className="flex gap-2 items-center">
-                      <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)}
+                      <input type="datetime-local" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} style={{ colorScheme: "dark" }}
                         className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                       <button onClick={() => setSchedulingJobId(null)} className="rounded-lg border border-border px-3 py-2 text-xs hover:bg-muted">Cancel</button>
                       <button

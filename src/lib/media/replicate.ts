@@ -91,17 +91,20 @@ export class ReplicateClient {
     prompts: Array<{ prompt: string; aspectRatio?: ImageGenOptions["aspectRatio"] }>,
     model: FluxModel = "schnell"
   ): Promise<ArrayBuffer[]> {
-    // Create all predictions concurrently
-    const predictions = await Promise.all(
-      prompts.map((p) =>
-        this.createPrediction(FLUX_MODELS[model] ?? FLUX_MODELS.schnell, {
+    // Create predictions SEQUENTIALLY to respect Replicate's rate limit.
+    // Accounts with < $5 credit are throttled to 6 req/min with a burst of 1,
+    // so firing all creates at once trips a 429. createPrediction retries on 429.
+    const predictions: ReplicatePrediction[] = [];
+    for (const p of prompts) {
+      predictions.push(
+        await this.createPrediction(FLUX_MODELS[model] ?? FLUX_MODELS.schnell, {
           prompt: p.prompt,
           aspect_ratio: p.aspectRatio ?? "1:1",
           num_outputs: 1,
           output_format: "png",
         })
-      )
-    );
+      );
+    }
 
     // Poll all concurrently
     const results = await Promise.all(
@@ -130,22 +133,38 @@ export class ReplicateClient {
     model: string,
     input: Record<string, unknown>
   ): Promise<ReplicatePrediction> {
-    const response = await fetch(`${REPLICATE_API_URL}/models/${model}/predictions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-        "Content-Type": "application/json",
-        Prefer: "respond-async",
-      },
-      body: JSON.stringify({ input }),
-    });
+    const maxAttempts = 6;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const response = await fetch(`${REPLICATE_API_URL}/models/${model}/predictions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+          "Content-Type": "application/json",
+          Prefer: "respond-async",
+        },
+        body: JSON.stringify({ input }),
+      });
 
-    if (!response.ok) {
+      if (response.ok) {
+        return (await response.json()) as ReplicatePrediction;
+      }
+
       const errText = await response.text();
+
+      // Rate limited (429): wait the suggested retry_after, then retry.
+      if (response.status === 429 && attempt < maxAttempts) {
+        let retryAfter = 11; // default just above Replicate's ~10s reset window
+        try {
+          const parsed = JSON.parse(errText) as { retry_after?: number };
+          if (typeof parsed.retry_after === "number") retryAfter = parsed.retry_after + 1;
+        } catch { /* use default */ }
+        await new Promise((r) => setTimeout(r, retryAfter * 1000));
+        continue;
+      }
+
       throw new Error(`Replicate create failed (${response.status}): ${errText}`);
     }
-
-    return response.json() as Promise<ReplicatePrediction>;
+    throw new Error("Replicate create failed: exhausted retries after repeated 429s");
   }
 
   /**

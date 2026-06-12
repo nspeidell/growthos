@@ -412,6 +412,42 @@ Return JSON with this exact structure:
   });
 }
 
+/**
+ * Generate a social caption for a completed video/media job using its script.
+ * Used to pre-fill the schedule modal so the user never starts from a blank box.
+ */
+export async function generateVideoCaption(
+  jobId: string
+): Promise<ActionResult<{ caption: string }>> {
+  return safeAction(async () => {
+    const session = await requirePermission("content:write");
+    const { DB } = getBindings();
+    const db = createDb(DB);
+
+    const job = await db
+      .select()
+      .from(mediaJobs)
+      .where(and(eq(mediaJobs.id, jobId), eq(mediaJobs.workspaceId, session.workspaceId)))
+      .get();
+    if (!job) throw new Error("Job not found");
+
+    let script = "";
+    try {
+      const cfg = job.config ? (JSON.parse(job.config) as { script?: string }) : {};
+      script = cfg.script ?? "";
+    } catch { /* config may not be JSON */ }
+    const basis = script.trim() || job.prompt;
+
+    const caption = await generateWithClaude({
+      systemPrompt: `You write warm, human social media captions for Reunion — a family connection app. Captions are scroll-stopping but never corporate. Output ONLY the caption text — no quotes, no preamble, no labels.`,
+      userMessage: `Write a social media caption (120-200 characters) for a short video. Include a soft call to action and 2-4 relevant hashtags. Base it on this video content:\n\n${basis}`,
+      maxTokens: 300,
+    });
+
+    return { caption: caption.trim().replace(/^["']+|["']+$/g, "") };
+  });
+}
+
 export async function createCarouselJob(
   formData: FormData
 ): Promise<ActionResult<{ jobId: string; status: string }>> {
