@@ -457,19 +457,24 @@ async function generateBRollImages(
   config: VideoCompositeConfig
 ): Promise<string[]> {
   const client = new ReplicateClient(env.REPLICATE_API_TOKEN);
-  const tags = config.subjectTags ?? [];
-  const vibe = config.emotionalVibe ?? "professional";
+  const vibe = config.emotionalVibe ?? "warm cinematic";
 
-  // Generate 3-5 B-roll images based on script content
-  const scenes = extractScenes(config.script, tags);
-  const maxImages = Math.min(scenes.length, 5);
-  const selectedScenes = scenes.slice(0, maxImages);
+  // Prefer Claude's purpose-built visual prompts — they're generated alongside the
+  // script to match its mood and topic. Only fall back to naive sentence extraction
+  // if the job has none. (Using raw narration sentences produced random, off-topic images.)
+  const claudePrompts = (config.imagePrompts ?? []).filter((p) => p && p.trim().length > 0);
+  const baseScenes = claudePrompts.length > 0
+    ? claudePrompts
+    : extractScenes(config.script, config.subjectTags ?? []);
+  const selectedScenes = baseScenes.slice(0, 5);
 
   const platform = config.platform ?? job.platform ?? "youtube";
   const ratio = platform === "tiktok" || platform === "instagram" ? "9:16" : "16:9";
 
+  // Shared style suffix keeps the images visually cohesive so they feel like one video.
+  const styleSuffix = `${vibe} mood, cinematic B-roll footage, consistent warm film color grading, shallow depth of field, natural lighting, photorealistic, no text, no watermarks, no logos`;
   const prompts = selectedScenes.map((scene) => ({
-    prompt: `${scene}, ${vibe} mood, cinematic B-roll footage style, high quality, no text, no watermarks`,
+    prompt: `${scene}, ${styleSuffix}`,
     aspectRatio: ratio as "9:16" | "16:9",
   }));
 

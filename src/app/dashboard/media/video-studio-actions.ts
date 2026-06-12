@@ -100,10 +100,14 @@ export async function generateVideoScript(
       ? "This is for a square social media post. Balanced, clear, engaging."
       : "This is for a horizontal LinkedIn/YouTube video. More depth, slightly longer."
 
+    const humorNote = input.contentPillar === "humor"
+      ? `\nThis one is COMEDY. Be actually funny — specific, observational, the relatable absurdity of family life (the group chat chaos, the one uncle, the holiday logistics, grandma's "simple question"). Land a real punchline or a sharp turn. Avoid generic "family is great" sentiment and avoid corny dad-joke groaners.`
+      : "";
+
     const generated = await generateWithClaude({
       systemPrompt: `You are a video script writer for Reunion — a family connection app.
 Your scripts are warm, human, never corporate. You specialize in ${pillarContext[input.contentPillar]}.
-${formatNote}
+${formatNote}${humorNote}
 Scripts should feel like a trusted friend talking, not an ad.`,
       userMessage: `Write a video script for: "${input.topic}"
 
@@ -113,11 +117,11 @@ Format your response as JSON with these exact keys:
 {
   "title": "Short punchy title for the video (5-8 words)",
   "script": "The full narration script — just the words spoken, no stage directions",
-  "imagePrompts": ["prompt1", "prompt2", "prompt3"]
+  "imagePrompts": ["prompt1", "prompt2", "prompt3", "prompt4", "prompt5"]
 }
 
-The imagePrompts should be 3 Stable Diffusion prompts for warm, cinematic family photography backgrounds that match the video's mood. Think: golden hour, natural settings, authentic family moments. No text, no logos.`,
-      maxTokens: 1000,
+The imagePrompts are B-roll visuals shown in sequence behind the narration, so they must FOLLOW THE SCRIPT'S STORY beat by beat (prompt 1 = opening line's visual, last = closing line's visual). Write 5 photorealistic, cinematic prompts that each depict the specific moment/subject being narrated at that point — concrete scenes, real people and settings, warm natural light. They should share a consistent cinematic style so they feel like one film. No text, no logos, no collages.`,
+      maxTokens: 1200,
     });
 
     // Parse JSON response

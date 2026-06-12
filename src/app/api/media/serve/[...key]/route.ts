@@ -66,6 +66,8 @@ export async function GET(
     const headers: Record<string, string> = {
       "Content-Type": contentType,
       "Cache-Control": "public, max-age=3600",
+      // Advertise range support so browsers (esp. Safari) will stream/seek video.
+      "Accept-Ranges": "bytes",
     };
 
     if (download) {
@@ -73,7 +75,42 @@ export async function GET(
       headers["Content-Disposition"] = `attachment; filename="${filename}"`;
     }
 
-    return new NextResponse(object.body, { headers });
+    // Honor HTTP Range requests — <video>/<audio> elements require 206 partial
+    // responses to begin playback reliably. Without this, the first play often
+    // fails until a page refresh.
+    const rangeHeader = request.headers.get("range");
+    const size = object.size;
+    if (rangeHeader) {
+      const match = /bytes=(\d*)-(\d*)/.exec(rangeHeader);
+      if (match) {
+        let start = match[1] ? parseInt(match[1], 10) : 0;
+        let end = match[2] ? parseInt(match[2], 10) : size - 1;
+        if (Number.isNaN(start)) start = 0;
+        if (Number.isNaN(end) || end >= size) end = size - 1;
+        if (start > end || start >= size) {
+          return new NextResponse(null, {
+            status: 416,
+            headers: { "Content-Range": `bytes */${size}`, "Accept-Ranges": "bytes" },
+          });
+        }
+        const ranged = await BUCKET.get(r2Key, { range: { offset: start, length: end - start + 1 } });
+        if (!ranged) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        return new NextResponse(ranged.body, {
+          status: 206,
+          headers: {
+            ...headers,
+            "Content-Range": `bytes ${start}-${end}/${size}`,
+            "Content-Length": String(end - start + 1),
+          },
+        });
+      }
+    }
+
+    return new NextResponse(object.body, {
+      headers: { ...headers, "Content-Length": String(size) },
+    });
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
