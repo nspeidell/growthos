@@ -184,6 +184,10 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
   const [avatarTitle, setAvatarTitle] = useState("");
   const [avatarJobs, setAvatarJobs] = useState<MediaJob[]>([]);
 
+  // Inline video player — avoids navigating to the raw /api/media/serve endpoint
+  // (which returns JSON on any 404/auth hiccup). The <video> element loads/retries gracefully.
+  const [playingUrl, setPlayingUrl] = useState<string | null>(null);
+
   const loadData = useCallback(async () => {
     const [jobsResult, voicesResult, videoJobsResult, carouselJobsResult, avatarJobsResult] = await Promise.all([
       listMediaJobs(),
@@ -320,6 +324,29 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
 
   return (
     <div className="space-y-6">
+      {/* Inline video player overlay */}
+      {playingUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setPlayingUrl(null)}
+        >
+          <div className="relative max-w-3xl w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setPlayingUrl(null)}
+              className="absolute -top-10 right-0 text-white text-sm inline-flex items-center gap-1 hover:opacity-80"
+            >
+              ✕ Close
+            </button>
+            <video
+              src={playingUrl}
+              controls
+              autoPlay
+              className="w-full rounded-lg bg-black shadow-2xl"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
         <button onClick={() => setActiveTab("video")}
@@ -433,10 +460,10 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                         {(job.status === "queued" || job.status === "processing") && <Loader2 className="w-4 h-4 text-primary animate-spin" />}
                         {job.status === "completed" && job.resultR2Key && (
                           <>
-                            <a href={`/api/media/serve/${job.resultR2Key}`} target="_blank" rel="noopener noreferrer"
+                            <button onClick={() => setPlayingUrl(`/api/media/serve/${job.resultR2Key}`)}
                               className="inline-flex items-center gap-1 rounded-md bg-muted border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted/80">
                               <Play className="w-3 h-3" /> Play
-                            </a>
+                            </button>
                             {showSchedule && (
                               <button onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}
                                 className="inline-flex items-center gap-1 rounded-md bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:bg-primary/90">
@@ -954,10 +981,10 @@ export function MediaStudio({ showSchedule = false }: { showSchedule?: boolean }
                         )}
                         {job.status === "completed" && job.resultR2Key && (
                           <>
-                            <a href={`/api/media/serve/${job.resultR2Key}`} target="_blank" rel="noopener noreferrer"
+                            <button onClick={() => setPlayingUrl(`/api/media/serve/${job.resultR2Key}`)}
                               className="inline-flex items-center gap-1 rounded-md bg-muted border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-muted/80">
                               <Play className="w-3 h-3" /> Play
-                            </a>
+                            </button>
                             {showSchedule && (
                               <button
                                 onClick={() => { setSchedulingJobId(job.id); setScheduleCaption(""); setScheduleResult(null); }}

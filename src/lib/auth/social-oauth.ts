@@ -50,6 +50,7 @@ export const PLATFORM_OAUTH_CONFIGS: Record<string, PlatformOAuthConfig> = {
       "pages_show_list",
       "pages_manage_posts",
       "pages_read_engagement",
+      "business_management", // Required for New Pages Experience pages to appear in /me/accounts
       // publish_to_groups + groups_access_member_info require Meta app review — pending approval
     ],
     clientIdEnvKey: "META_APP_ID",

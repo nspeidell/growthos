@@ -363,19 +363,27 @@ async function processVideoComposite(
     httpMetadata: { contentType: "audio/mpeg" },
   });
 
-  // ─── Step 2: Skip B-roll for now (Cloudflare Workers free tier: 50 subrequest limit) ───
-  // Replicate polling burns too many subrequests. Use solid brand background instead.
-  // TODO: add B-roll generation once on Workers Paid plan ($5/mo lifts limit to 1000).
-  const bRollKeys: string[] = [];
+  // ─── Step 2: Generate B-roll visuals (Workers Paid plan — 1000 subrequest limit) ───
+  // Replicate Flux generates 3-5 cinematic scene images from the script; Creatomate
+  // cycles through them behind the voiceover for complementary changing visuals.
+  let bRollKeys: string[] = [];
+  try {
+    bRollKeys = await generateBRollImages(job, env, config);
+  } catch (err) {
+    // B-roll is enhancement-only: on failure, fall back to a solid background
+    // rather than failing the entire render.
+    console.error(`B-roll generation failed for job ${job.jobId}, using solid background:`, err);
+    bRollKeys = [];
+  }
 
   // ─── Step 3: Submit video render to Creatomate (source-based — no templates needed) ───
   if (env.CREATOMATE_API_KEY) {
     const creatomate = new CreatomateClient(env.CREATOMATE_API_KEY);
     const appUrl = env.APP_URL;
-    // Use R2 public URL so Creatomate can fetch the audio without auth
+    // Use R2 public URL so Creatomate can fetch the audio + B-roll images without auth
     const r2Base = env.R2_PUBLIC_URL ?? `${appUrl}/api/media/serve`;
     const audioUrl = `${r2Base}/${audioKey}`;
-    const bRollUrls: string[] = []; // empty = solid Reunion green background
+    const bRollUrls: string[] = bRollKeys.map((k) => `${r2Base}/${k}`);
     const webhookUrl = `${appUrl}/api/webhooks/creatomate`;
 
     const renderId = await creatomate.submitVoiceoverRender({
