@@ -76,11 +76,16 @@ export function buildVoiceoverVideoSource(options: {
   if (bgImages.length > 0) {
     const segDuration = duration / bgImages.length;
     bgImages.forEach((url, i) => {
+      // Alternate the Ken Burns direction so consecutive shots feel different
+      // (zoom-in vs zoom-out, anchored to opposite corners for a pan-like drift).
+      const zoomIn = i % 2 === 0;
+      const xAnchor = i % 2 === 0 ? "30%" : "70%";
+      const yAnchor = i % 3 === 0 ? "30%" : "70%";
       elements.push({
         type: "image",
         track: 1,
         time: i * segDuration,
-        duration: segDuration + 0.5, // slight overlap for smooth transition
+        duration: segDuration + 0.8, // overlap enables a crossfade into the next shot
         source: url,
         fit: "cover",
         x: "50%",
@@ -88,12 +93,18 @@ export function buildVoiceoverVideoSource(options: {
         width: "100%",
         height: "100%",
         animations: [
+          // Slow cinematic zoom anchored off-center → reads as a gentle pan.
           {
             type: "scale",
-            easing: "linear",
-            start_scale: "100%",
-            end_scale: "110%",
+            easing: "ease-in-out",
+            x_anchor: xAnchor,
+            y_anchor: yAnchor,
+            start_scale: zoomIn ? "105%" : "122%",
+            end_scale: zoomIn ? "122%" : "105%",
           },
+          // Crossfade in; overlap with the next image crossfades it out.
+          { type: "fade", time: "start", duration: 0.7 },
+          { type: "fade", time: "end", duration: 0.7 },
         ],
       });
     });
@@ -111,7 +122,8 @@ export function buildVoiceoverVideoSource(options: {
     });
   }
 
-  // Dark forest-green overlay for text readability (on-brand, not generic black)
+  // Light full-screen tint for brand cohesion — kept subtle so the B-roll shows
+  // through (the old 55% overlay flattened everything into a dull wash).
   elements.push({
     type: "shape",
     track: 2,
@@ -120,7 +132,19 @@ export function buildVoiceoverVideoSource(options: {
     y: "50%",
     width: "100%",
     height: "100%",
-    fill_color: "rgba(53,100,79,0.55)",  // #35664F at 55% opacity
+    fill_color: "rgba(53,100,79,0.22)",  // #35664F at 22%
+  });
+
+  // Stronger band behind the captions only (bottom third) for readability.
+  elements.push({
+    type: "shape",
+    track: 2,
+    shape: "rectangle",
+    x: "50%",
+    y: "85%",
+    width: "100%",
+    height: "30%",
+    fill_color: "rgba(0,0,0,0.5)",
   });
 
   // Title text (top third)
@@ -145,9 +169,11 @@ export function buildVoiceoverVideoSource(options: {
     });
   }
 
-  // Voiceover audio
+  // Voiceover audio — MUST have a name so the caption element's
+  // transcript_source can reference it (otherwise no captions render).
   elements.push({
     type: "audio",
+    name: "audio",
     track: 4,
     source: options.audioUrl,
     volume: "100%",

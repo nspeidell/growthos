@@ -78,6 +78,62 @@ const REUNION_VOICE_PRESETS = [
     gender: "male",
     recommended: false,
   },
+  {
+    id: "EXAVITQu4vr4xnSDxMaL",
+    name: "Sarah",
+    description: "Soft, warm, reassuring — lovely for heartfelt family stories",
+    gender: "female",
+    recommended: true,
+  },
+  {
+    id: "FGY2WhTYpPnrIDTdsKH5",
+    name: "Laura",
+    description: "Upbeat, youthful, bright — great for fun, energetic posts",
+    gender: "female",
+    recommended: false,
+  },
+  {
+    id: "JBFqnCBsd6RMkjVDRZzb",
+    name: "George",
+    description: "Warm British narrator — rich and trustworthy storytelling",
+    gender: "male",
+    recommended: true,
+  },
+  {
+    id: "XB0fDUnXU5powFXDhCwa",
+    name: "Charlotte",
+    description: "Gentle, expressive, emotive — strong for nostalgic content",
+    gender: "female",
+    recommended: false,
+  },
+  {
+    id: "XrExE9yKIg1WjnnlVkGX",
+    name: "Matilda",
+    description: "Warm, friendly, approachable — versatile everyday voice",
+    gender: "female",
+    recommended: false,
+  },
+  {
+    id: "onwK4e9ZLuTAKqWW03F9",
+    name: "Daniel",
+    description: "Deep, authoritative British — great for bold statements",
+    gender: "male",
+    recommended: false,
+  },
+  {
+    id: "pFZP5JQG7iQjIQuC4Bku",
+    name: "Lily",
+    description: "Warm British, soothing — calm and intimate delivery",
+    gender: "female",
+    recommended: false,
+  },
+  {
+    id: "nPczCjzI2devNBz1zQrb",
+    name: "Brian",
+    description: "Deep, calm, cinematic — documentary-style narration",
+    gender: "male",
+    recommended: false,
+  },
 ] as const;
 
 const IMAGE_TYPES = [
