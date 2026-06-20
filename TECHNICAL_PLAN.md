@@ -1,7 +1,32 @@
 # GrowthOS — Technical Plan
 
-**Last updated:** May 28, 2026
-**Status:** Original 14 build phases complete + 3 new modules (Influencers, Pinterest, JV Marketing). Now operating under revised council-reviewed architecture: 6 master phases + 3 cross-cutting systems. Autonomy is earned, not assumed.
+**Last updated:** June 11, 2026
+**Status:** Original 14 build phases complete + new modules (Influencers, Pinterest, JV Marketing, D-ID Avatar Video, Instagram Carousel). Video pipeline now fully live end-to-end with B-roll, synced captions, and cinematic motion. Operating under revised council-reviewed architecture: 6 master phases + 3 cross-cutting systems. Autonomy is earned, not assumed.
+
+**Infrastructure note:** Cloudflare **Workers Paid** plan is now active (subrequest limit 50 → 1,000), which unblocks multi-image B-roll generation in the media-gen worker.
+
+---
+
+## 📋 Recent Changes — June 2026 Session
+
+Video pipeline hardening + multi-format publishing. All deployed to production.
+
+**Media / Video pipeline:**
+- **B-roll enabled** — `media-gen` worker now generates 3–5 cinematic Flux images per video (was stubbed out on free tier). Uses Claude's purpose-built `imagePrompts` from the script (not naive sentence-chopping) for on-topic, cohesive visuals. Wrapped in try/catch → degrades to solid background on failure.
+- **Replicate rate-limit handling** — image creates are now sequential with 429 retry (respects `retry_after`). Accounts under $5 credit are throttled to 6 req/min, burst 1.
+- **Captions fixed** — caption element's `transcript_source: "audio"` now resolves because the audio element has `name: "audio"`. Synced word captions render; previously text was static.
+- **Cinematic motion** — alternating Ken Burns (zoom in/out, off-center anchors) + crossfades between shots; heavy 55% green overlay reduced to 22% + caption band only.
+- **Inline video player** — Play button opens an in-page `<video>` modal instead of navigating to the raw `/api/media/serve` endpoint (which returned JSON on any 404/auth hiccup).
+- **HTTP Range support** in `/api/media/serve/[...key]` — returns 206 partial content so `<video>` plays on first click (no refresh needed).
+- **14 ElevenLabs voice presets** (was 6) — added current default-library voices.
+- **AI caption** — `generateVideoCaption` server action pre-fills the schedule modal caption via Claude.
+- **datetime picker visibility** — `color-scheme: dark` so the native calendar icon shows on dark UI.
+
+**Publishing / OAuth:**
+- **Facebook New Pages Experience fix** — added `business_management` scope so NPE pages appear in `/me/accounts`. Symptom was a personal profile ID being stored instead of the Page ID. Data hygiene: reconnects can leave duplicate `connected_accounts` rows; the Settings UI lists all rows, so prune revoked duplicates (repoint `scheduled_posts` + `communities` FKs first — see Schema notes).
+- **Instagram Carousel** publishing (`CAROUSEL_ALBUM`) via `publishInstagramCarousel` in adapters.
+- **D-ID avatar video** client (`src/lib/video/did-client.ts`) — talking-head videos; `avatar_video` job type.
+- **Migration 0028** — added `carousel`, `avatar_video` to media_jobs type enum and `did` to provider enum.
 
 ---
 
@@ -761,12 +786,27 @@ Cookie TTL = `attribution_window_days` (default 30). First-touch preserved acros
 
 ---
 
-### Pending Migrations
+### Recent Migrations (0021–0028) — APPLIED
+
+| Migration | Purpose |
+|-----------|---------|
+| 0021 | `fix_next_step_at_sentinel` — automation enrollment timing fix |
+| 0022 | `connected_accounts_index` |
+| 0023 | `media_jobs_type_constraint` |
+| 0024 | `influencers` module |
+| 0025 | `event_log` |
+| 0026 | `jv_partners` — JV marketing & referral tracking |
+| 0027 | `community_campaigns` — community auto-post campaigns |
+| 0028 | `media_job_types` — adds `carousel`, `avatar_video` types + `did` provider; rebuilds `media_jobs` (preserves rows) |
+
+> **Note:** Migration numbers 0027/0028 were used for community_campaigns and media_job_types respectively (earlier drafts of this doc reserved them for kill_switches/workspace_limits — those are now unimplemented and will take the next free numbers).
+
+### Pending Migrations (Phase 5)
 
 | Migration | Purpose | Phase |
 |-----------|---------|-------|
-| 0027 | `kill_switches` — global + scoped pause controls | Phase 5 / Cross-cutting |
-| 0028 | `workspace_limits` — budget engine hard caps | Phase 5 |
+| (next) | `kill_switches` — global + scoped pause controls | Phase 5 / Cross-cutting |
+| (next) | `workspace_limits` — budget engine hard caps | Phase 5 |
 
 ---
 
@@ -801,6 +841,21 @@ Cookie TTL = `attribution_window_days` (default 30). First-touch preserved acros
 - **Secrets:** ENCRYPTION_KEY, META_APP_ID, META_APP_SECRET, X_CLIENT_ID, X_CLIENT_SECRET, LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET
 - **Cron:** `0 * * * *` (every hour)
 - **Logic:** Finds accounts with `token_expires_at <= now + 24h`. Refreshes via platform-specific flow. On failure: marks `account_status = 'error'`.
+
+### growthos-media-gen
+- **Config:** `wrangler.media-gen.toml`
+- **Entry:** `src/workers/media-gen.ts`
+- **Deploy:** `npm run deploy:media-gen`
+- **Bindings:** DB, BUCKET (R2), KV
+- **Secrets:** ELEVEN_LABS_API_KEY, REPLICATE_API_TOKEN, CREATOMATE_API_KEY, DID_API_KEY, MEDIA_SERVE_TOKEN
+- **Cron:** `* * * * *`
+- **Logic:** Polls `media_jobs` WHERE `job_status = 'queued'` (Pages Functions can't use Queue producers, so D1 is the handoff). Routes by job `type`:
+  - Image types (`meme`, `quote_card`, `thumbnail`, `promo`, `carousel_slide`, `ad_creative`) → Replicate Flux → R2.
+  - `carousel` → multi-slide Flux → R2 + manifest.
+  - `video_composite` → ElevenLabs TTS → Replicate B-roll (sequential, 429-retry) → Creatomate source render (Ken Burns + synced captions). Marks `processing`; the Creatomate webhook finalizes.
+  - `avatar_video` → D-ID talking-head (`did-client.ts`).
+- **Recovery:** also re-polls Creatomate for `processing` video jobs to recover from missed webhooks.
+- **Requires:** Workers Paid plan (B-roll exceeds the free 50-subrequest cap).
 
 ---
 
@@ -928,7 +983,14 @@ await env.DB.prepare(`UPDATE ... SET col = ? WHERE id = ?`).bind(val, id).run();
 `src/lib/media/replicate.ts` — `ReplicateClient.generateImage(options)`. Two models: `schnell` (~2-5s) and `pro` (~10-30s). `buildImagePrompt(brief, platform, jobType)` selects aspect ratio and visual style per platform automatically.
 
 ### Video Pipeline
-Script (Claude) → Voiceover (ElevenLabs) → Composition (Creatomate) → Storage (R2). Async via media queue. Job status tracked in `media_jobs`.
+**Flow:** Script + `imagePrompts` (Claude) → Voiceover (ElevenLabs) → B-roll images (Replicate Flux, from Claude's `imagePrompts`) → Composition (Creatomate, source-based) → Storage (R2) → Creatomate webhook marks complete.
+
+- **Async handoff:** Pages Function inserts a `media_jobs` row with `job_status='queued'`; `growthos-media-gen` (cron) polls and processes. No queue producer on the Pages side.
+- **Composition** (`src/lib/media/creatomate.ts → buildVoiceoverVideoSource`): background images on track 1 with alternating Ken Burns + crossfades; brand tint (22%) + caption band; title (track 3); **audio element named `"audio"`** so the caption text element's `transcript_source: "audio"` auto-transcribes into synced word captions; gold brand strip + optional logo.
+- **Playback:** `/api/media/serve/[...key]` supports HTTP Range (206) for reliable `<video>` streaming; UI plays inline via a modal.
+- **Voices:** 14 ElevenLabs presets in `media-studio.tsx` (`REUNION_VOICE_PRESETS`), plus founder/custom voices via `voice_profiles`.
+- **Avatar variant:** `avatar_video` jobs use D-ID (`src/lib/video/did-client.ts`) for talking-head presenters.
+- **Status** tracked in `media_jobs` (`queued → processing → completed/failed`), `result_r2_key` set by webhook.
 
 ---
 
